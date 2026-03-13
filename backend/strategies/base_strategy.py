@@ -32,10 +32,16 @@ class BaseStrategy(ABC):
         """Return boolean series of exit (SELL) conditions."""
         raise NotImplementedError
 
-    def calculate_stop_loss(self, entry_price: float) -> float:
-        sl_pct = self.params.get("maxDrawdownPct", 5.0)
-        return round(entry_price * (1 - sl_pct / 100), 8)
+    def calculate_stop_loss(self, entry_price: float, signal_type: str = "BUY") -> float:
+        sl_pct = self.params.get("maxDrawdownPct", 2.0)
+        if signal_type == "BUY":
+            return round(entry_price * (1 - sl_pct / 100), 8)
+        else: # SELL
+            return round(entry_price * (1 + sl_pct / 100), 8)
 
-    def calculate_take_profit(self, entry_price: float, ratio: float = 2.0) -> float:
-        sl_pct = self.params.get("maxDrawdownPct", 5.0)
-        return round(entry_price * (1 + (sl_pct * ratio) / 100), 8)
+    def calculate_take_profit(self, entry_price: float, signal_type: str = "BUY", ratio: float = 2.0) -> float:
+        sl_pct = self.params.get("maxDrawdownPct", 2.0)
+        if signal_type == "BUY":
+            return round(entry_price * (1 + (sl_pct * ratio) / 100), 8)
+        else: # SELL
+            return round(entry_price * (1 - (sl_pct * ratio) / 100), 8)

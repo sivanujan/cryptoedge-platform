@@ -54,6 +54,7 @@ class BacktestResult(Base):
     max_drawdown = Column(Float, nullable=True)
     sharpe_ratio = Column(Float, nullable=True)
     profit_factor = Column(Float, nullable=True)
+    volatility = Column(Float, nullable=True)
     tested_from = Column(DateTime, nullable=True)
     tested_to = Column(DateTime, nullable=True)
     error = Column(Text, nullable=True)
@@ -89,6 +90,7 @@ class Signal(Base):
     stop_loss = Column(Float, nullable=True)
     take_profit = Column(Float, nullable=True)
     confidence = Column(Float, nullable=True)
+    volatility = Column(Float, nullable=True)
     timeframe = Column(String(10), nullable=False, default="1h")
     status = Column(String(20), default="active")  # active, closed, cancelled
     created_at = Column(DateTime, default=datetime.utcnow)

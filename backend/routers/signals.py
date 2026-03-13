@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from database.connection import get_db
 from database.models import Signal
-from services.signal_service import get_live_signals, get_signal_history, get_signal_stats
+from services.signal_service import get_live_signals, get_signal_history, get_signal_stats, clear_all_signals
 from services.scanner_service import run_scanner
 from fastapi import BackgroundTasks
 
@@ -32,6 +32,15 @@ def signal_history(
     data = get_signal_history(db, coin, strategy, signal_type, result, limit, offset)
     stats = get_signal_stats(db)
     return {**stats, **data}
+
+
+@router.delete("/history")
+def clear_history(db: Session = Depends(get_db)):
+    """Delete all signal history."""
+    success = clear_all_signals(db)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to clear signal history")
+    return {"ok": True, "message": "Signal history cleared successfully"}
 
 
 @router.patch("/{signal_id}/status")

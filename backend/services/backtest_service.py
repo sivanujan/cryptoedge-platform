@@ -181,6 +181,10 @@ def run_backtest(
 
         # Simple backtest simulation (vectorised)
         metrics = _simulate_trades(df, strategy)
+        
+        # Current Volatility (ATR-based)
+        last_volatility = float(df["volatility_atr"].iloc[-1]) if "volatility_atr" in df.columns else None
+        metrics["volatility"] = round(last_volatility, 2) if last_volatility is not None else None
 
         result.update(metrics)
         tested_from = df.index[0].to_pydatetime() if hasattr(df.index[0], "to_pydatetime") else datetime.utcnow()
@@ -310,6 +314,7 @@ def _save_backtest_result(
         max_drawdown=metrics.get("max_drawdown"),
         sharpe_ratio=metrics.get("sharpe_ratio"),
         profit_factor=metrics.get("profit_factor"),
+        volatility=metrics.get("volatility"),
         tested_from=tested_from,
         tested_to=tested_to,
         error=error,
@@ -321,16 +326,33 @@ def _save_backtest_result(
 def assign_best_strategies(db: Session):
     """
     For each coin, find the best performing strategy+timeframe
-    and save to coin_strategy_map.
+    using a Weighted Win Rate (WWR) to favor statistical significance.
+    WWR = WinRate * min(trades, 10) / 10
     """
     coins = db.query(Coin).filter_by(is_active=True).all()
     for coin in coins:
-        best = (
+        results = (
             db.query(BacktestResult)
             .filter(BacktestResult.coin_id == coin.id, BacktestResult.win_rate.isnot(None))
-            .order_by(BacktestResult.win_rate.desc())
-            .first()
+            .all()
         )
+        
+        if not results:
+            continue
+            
+        # Select best using Weighted Win Rate
+        best = None
+        best_score = -1.0
+        
+        for r in results:
+            trades = r.total_trades or 0
+            weight = min(trades, 10) / 10.0
+            score = r.win_rate * weight
+            
+            if score > best_score:
+                best_score = score
+                best = r
+                
         if best:
             existing = (
                 db.query(CoinStrategyMap).filter_by(coin_id=coin.id).first()
@@ -349,4 +371,4 @@ def assign_best_strategies(db: Session):
                 )
                 db.add(mapping)
     db.commit()
-    logger.info("Best strategies assigned to all coins.")
+    logger.info("Best strategies assigned to all coins using weighted scoring.")

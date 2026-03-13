@@ -37,7 +37,8 @@ export default function Screener() {
                         win_rate: res.win_rate,
                         trades: res.trades,
                         return_pct: res.return_pct,
-                        drawdown: res.drawdown
+                        drawdown: res.drawdown,
+                        volatility: res.volatility
                     })
                 }
             })
@@ -225,6 +226,7 @@ export default function Screener() {
                                 <th style={{ padding: '16px 20px', fontFamily: 'var(--font-heading)', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', color: 'var(--text-dim)', borderBottom: '1px solid var(--border)' }}>TRADES</th>
                                 <th style={{ padding: '16px 20px', fontFamily: 'var(--font-heading)', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', color: 'var(--text-dim)', borderBottom: '1px solid var(--border)' }}>RETURN</th>
                                 <th style={{ padding: '16px 20px', fontFamily: 'var(--font-heading)', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', color: 'var(--text-dim)', borderBottom: '1px solid var(--border)' }}>DRAWDOWN</th>
+                                <th style={{ padding: '16px 20px', fontFamily: 'var(--font-heading)', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', color: 'var(--text-dim)', borderBottom: '1px solid var(--border)' }}>VOLATILITY</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -262,6 +264,7 @@ export default function Screener() {
                                         <td style={{ padding: '12px 20px', fontFamily: 'var(--font-mono)', fontSize: 13 }}>{row.trades}</td>
                                         <td style={{ padding: '12px 20px', fontFamily: 'var(--font-mono)', fontSize: 13, color: row.return_pct > 0 ? 'var(--green)' : 'var(--red)' }}>{row.return_pct > 0 ? '+' : ''}{row.return_pct?.toFixed(2)}%</td>
                                         <td style={{ padding: '12px 20px', fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--red)' }}>{row.drawdown?.toFixed(2)}%</td>
+                                        <td style={{ padding: '12px 20px', fontFamily: 'var(--font-mono)', fontSize: 13, color: row.volatility > 3 ? 'var(--red)' : 'var(--text-primary)' }}>{row.volatility ? `${row.volatility}%` : '—'}</td>
                                     </tr>
                                     )
                                 })

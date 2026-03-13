@@ -40,6 +40,7 @@ export const API = {
     getLiveSignals: () => api.get('/signals/live').then(r => r.data),
     triggerScanNow: () => api.post('/signals/scan-now').then(r => r.data),
     getSignalHistory: (params) => api.get('/signals/history', { params }).then(r => r.data),
+    clearSignalHistory: () => api.delete('/signals/history').then(r => r.data),
     getBacktestResults: (params) => api.get('/backtest/results', { params }).then(r => r.data),
     runBacktest: (body) => api.post('/backtest/run', body).then(r => r.data),
     runStrategyBacktest: (id) => api.post(`/backtest/run-strategy/${id}`).then(r => r.data),

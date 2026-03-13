@@ -149,7 +149,22 @@ export default function StrategyCard({ strategy, onClick, onRunBacktest, onRefre
                     <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: wr > 0 ? wrColor : 'var(--text-dim)' }}>
                         {wr > 0 ? wrText : 'No data'}
                     </div>
-                    {wr > 0 && <div style={{ fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.06em', fontWeight: 600 }}>BEST WIN RATE</div>}
+                    {wr > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+                            <div style={{ fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.06em', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                BEST WIN RATE
+                                {summary?.best_trades < 5 && (
+                                    <AlertCircle size={10} color="var(--yellow)" title="Low trade count - low statistical significance" />
+                                )}
+                            </div>
+                            {summary?.best_coin && (
+                                <div style={{ fontSize: 10, color: 'var(--cyan)', fontWeight: 600, opacity: 0.8, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    {summary.best_coin.split(' ')[0]} 
+                                    <span style={{ fontSize: 9, opacity: 0.6, color: 'var(--text-dim)' }}>({summary.best_trades} trades)</span>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
 

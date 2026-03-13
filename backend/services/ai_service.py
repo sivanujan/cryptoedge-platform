@@ -14,14 +14,17 @@ logger = logging.getLogger(__name__)
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_URL     = "https://openrouter.ai/api/v1/chat/completions"
+DEFAULT_MODEL      = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-haiku")
 
-# Paid models that are incredibly cheap but extremely smart at coding
-# Claude 3.5 Haiku is ~$1 per million tokens and very reliable
+# Fallback models prioritized if the default fails or is exhausted
 MODEL_FALLBACKS = [
-    "anthropic/claude-3.5-haiku",      # Primary: Very fast, smart, cheap
-    "google/gemini-2.0-flash-exp:free",# Excellent backup
-    "meta-llama/llama-3.3-70b-instruct" # Powerful backup
+    DEFAULT_MODEL,
+    "anthropic/claude-3.5-haiku",       # Very fast, smart
+    "google/gemini-2.0-flash-exp:free", # Excellent free backup
+    "meta-llama/llama-3.3-70b-instruct"  # Powerful backup
 ]
+# Ensure no duplicates while preserving order
+MODEL_FALLBACKS = list(dict.fromkeys(MODEL_FALLBACKS))
 
 _SYSTEM_PROMPT = """You are an expert algorithmic trading developer.
 Your job is to convert TradingView Pine Script strategies into Python classes
@@ -125,9 +128,20 @@ def convert_pine_to_python(pine_script: str, strategy_name: str = "") -> str:
 
     for model in MODEL_FALLBACKS:
         payload["model"] = model
-        logger.info(f"Trying Paid OpenRouter model: {model}...")
+        logger.info(f"Trying OpenRouter model: {model}...")
         try:
             resp = requests.post(OPENROUTER_URL, json=payload, headers=headers, timeout=120)
+            
+            if resp.status_code == 401:
+                last_error = "OpenRouter 401 Unauthorized - Please check if your API key is valid and has not expired."
+                logger.error(last_error)
+                raise RuntimeError(last_error)
+            
+            if resp.status_code == 402:
+                last_error = "OpenRouter 402 Payment Required - Your account may have insufficient credits."
+                logger.error(last_error)
+                raise RuntimeError(last_error)
+
             if resp.status_code in (429, 400, 404):
                 last_error = f"Model {model} returned {resp.status_code}: {resp.text[:200]}"
                 logger.warning(f"{last_error} — trying next fallback...")
@@ -140,8 +154,8 @@ def convert_pine_to_python(pine_script: str, strategy_name: str = "") -> str:
             code = data["choices"][0]["message"]["content"]
             break  # success
         except requests.RequestException as e:
-            last_error = str(e)
-            logger.warning(f"Model {model} failed: {e} — trying next fallback...")
+            last_error = f"Request to {model} failed: {str(e)}"
+            logger.warning(f"{last_error} — trying next fallback...")
             continue
     else:
         raise RuntimeError(f"All models exhausted. Last error: {last_error}")

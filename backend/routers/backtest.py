@@ -74,6 +74,7 @@ def backtest_results(
                 "max_drawdown": r.max_drawdown,
                 "sharpe_ratio": r.sharpe_ratio,
                 "profit_factor": r.profit_factor,
+                "volatility": r.volatility,
                 "tested_from": r.tested_from.isoformat() if r.tested_from else None,
                 "tested_to": r.tested_to.isoformat() if r.tested_to else None,
             }
@@ -253,12 +254,23 @@ def run_strategy_backtest(
                         if res:
                             wr = res.get("win_rate")
                             if wr is not None:
-                                logger.info(f"[Backtest] {coin_symbol} {tf} | win_rate={wr}%")
-                                if wr > best_wr:
+                                total_trades = res.get("total_trades", 0)
+                                # Weighted Score: penalize low trade counts (capped at 10 trades for max weight)
+                                # This ensures 10 trades at 60% > 1 trade at 100%
+                                weight = min(total_trades, 10) / 10.0
+                                weighted_score = wr * weight
+                                
+                                logger.info(f"[Backtest] {coin_symbol} {tf} | win_rate={wr}% | trades={total_trades} | score={round(weighted_score, 1)}")
+                                
+                                # Use weighted score to determine the "best"
+                                current_best_score = _jobs.get(f"{job_id}_best_score", -1.0)
+                                if weighted_score > current_best_score:
                                     best_wr = wr
+                                    _jobs[f"{job_id}_best_score"] = weighted_score
                                     updates["best_win_rate"] = best_wr
-                                    updates["best_coin"] = f"{coin_symbol} ({wr}% on {tf})"
-                                if wr >= 65.0:
+                                    updates["best_coin"] = f"{coin_symbol} ({wr}% on {tf}, {total_trades} trades)"
+                                    
+                                if wr >= 65.0 and total_trades >= 3:
                                     coins_above_65.add(coin_symbol)
                                     updates["coins_above_65"] = len(coins_above_65)
                         _upd_db2 = SessionLocal()
@@ -354,6 +366,7 @@ def backtest_results_table(
             "trades": r.total_trades,
             "return_pct": r.total_return,
             "drawdown": r.max_drawdown,
+            "volatility": r.volatility,
             "error": r.error,
         }
 
@@ -363,9 +376,18 @@ def backtest_results_table(
                 grouped[key]["best_win_rate"] = r.win_rate
                 grouped[key]["best_timeframe"] = r.timeframe
 
-    # Convert to list — sort by best win rate descending (None = 0 coins tested = goes to bottom)
+    # Convert to list — sort by weighted win rate descending
+    # WWR = win_rate * min(trades, 10) / 10
+    def get_weighted_score(item):
+        wr = item.get("best_win_rate")
+        # Find the trades for the best timeframe
+        tf = item.get("best_timeframe")
+        trades = item["results"].get(tf, {}).get("trades", 0) if tf else 0
+        if wr is None: return -1.0
+        return wr * min(trades, 10) / 10.0
+
     table_data = list(grouped.values())
-    table_data.sort(key=lambda x: x["best_win_rate"] if x["best_win_rate"] is not None else -1.0, reverse=True)
+    table_data.sort(key=get_weighted_score, reverse=True)
 
     return table_data
 
@@ -404,8 +426,16 @@ def backtest_summary(strategy_id: int, db: Session = Depends(get_db)):
     coins_above_65 = set()
     coins_above_55 = set()
     
+    # Selection logic using Weighted Win Rate
+    best_weighted_score = -1.0
+    
     for r in results:
         coins_tested.add(r.coin_id)
+        
+        # Calculate Weighted Score for this result
+        trades = r.total_trades or 0
+        weight = min(trades, 10) / 10.0
+        weighted_score = r.win_rate * weight
         
         if r.timeframe not in tf_stats:
             tf_stats[r.timeframe] = {"sum": 0, "count": 0}
@@ -413,15 +443,17 @@ def backtest_summary(strategy_id: int, db: Session = Depends(get_db)):
         tf_stats[r.timeframe]["sum"] += r.win_rate
         tf_stats[r.timeframe]["count"] += 1
         
-        if r.win_rate >= 65.0:
+        if r.win_rate >= 65.0 and trades >= 3:
             coins_above_65.add(r.coin_id)
-        if r.win_rate >= 55.0:
+        if r.win_rate >= 55.0 and trades >= 3:
             coins_above_55.add(r.coin_id)
             
-        if r.win_rate > best_overall_wr:
+        if weighted_score > best_weighted_score:
+            best_weighted_score = weighted_score
             best_overall_wr = r.win_rate
             best_overall_tf = r.timeframe
             best_overall_coin = r.coin.symbol if r.coin else None
+            best_overall_trades = trades
 
     # Calculate TF averages
     avg_by_tf = {}
@@ -441,7 +473,8 @@ def backtest_summary(strategy_id: int, db: Session = Depends(get_db)):
         "coins_above_65": len(coins_above_65),
         "coins_above_55": len(coins_above_55),
         "best_coin": best_overall_coin,
-        "best_win_rate": best_overall_wr,
+        "best_win_rate": best_overall_wr if best_overall_wr >= 0 else 0,
+        "best_trades": best_overall_trades if 'best_overall_trades' in locals() else 0,
         "best_timeframe_overall": best_tf_overall,
         "avg_win_rate_by_timeframe": avg_by_tf,
         "last_run": results[0].created_at.isoformat() if results[0].created_at else None

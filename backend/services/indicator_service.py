@@ -108,6 +108,28 @@ def add_volume_ratio(df: pd.DataFrame, period: int = 20) -> pd.DataFrame:
     return df
 
 
+def add_volatility(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+    """Add volatility % column based on ATR / Close * 100."""
+    if _USE_PTA:
+        atr = pta.atr(df["high"], df["low"], df["close"], length=period)
+        if atr is not None:
+            df["volatility_atr"] = (atr / df["close"]) * 100
+    elif _USE_TA:
+        import ta as ta_lib
+        atr_ind = ta_lib.volatility.AverageTrueRange(high=df["high"], low=df["low"], close=df["close"], window=period)
+        df["volatility_atr"] = (atr_ind.average_true_range() / df["close"]) * 100
+    else:
+        # Simple manual ATR
+        high_low = df["high"] - df["low"]
+        high_close = (df["high"] - df["close"].shift()).abs()
+        low_close = (df["low"] - df["close"].shift()).abs()
+        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        atr = tr.rolling(period).mean()
+        df["volatility_atr"] = (atr / df["close"]) * 100
+    
+    return df
+
+
 def add_all_indicators(df: pd.DataFrame, strategy_params: dict = None) -> pd.DataFrame:
     """Add all standard indicators to a dataframe."""
     try:
@@ -118,6 +140,7 @@ def add_all_indicators(df: pd.DataFrame, strategy_params: dict = None) -> pd.Dat
         df = add_macd(df)
         df = add_bbands(df)
         df = add_volume_ratio(df)
+        df = add_volatility(df)
     except Exception as e:
         logger.error(f"Error adding indicators: {e}")
     return df

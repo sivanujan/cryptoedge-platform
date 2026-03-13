@@ -80,6 +80,13 @@ def run_scanner():
             logger.warning("No active coin-strategy mappings found, skipping scan.")
             return
 
+        # Fetch global risk settings
+        from database.models import Setting
+        settings_rows = db.query(Setting).all()
+        settings = {row.key: row.value for row in settings_rows}
+        global_sl = float(settings.get("default_sl_pct", 2.0))
+        global_tp = float(settings.get("default_tp_pct", 4.0))
+
         generated = 0
         for mapping in mappings:
             try:
@@ -102,6 +109,12 @@ def run_scanner():
                     last_confidence = float(df["confidence"].iloc[-1]) if "confidence" in df.columns else 70.0
                 except (TypeError, ValueError):
                     last_confidence = 70.0
+
+                try:
+                    last_volatility = float(df["volatility_atr"].iloc[-1]) if "volatility_atr" in df.columns else None
+                except (TypeError, ValueError):
+                    last_volatility = None
+
                 try:
                     last_close = float(df["close"].iloc[-1])
                 except (TypeError, ValueError):
@@ -110,8 +123,15 @@ def run_scanner():
 
                 if last_signal in (1, -1):
                     signal_type = "BUY" if last_signal == 1 else "SELL"
-                    sl = strategy.calculate_stop_loss(last_close)
-                    tp = strategy.calculate_take_profit(last_close)
+                    
+                    # Update strategy params with global defaults if not present
+                    if "maxDrawdownPct" not in strategy.params:
+                        strategy.params["maxDrawdownPct"] = global_sl
+
+                    sl = strategy.calculate_stop_loss(last_close, signal_type)
+                    # Adjust TP ratio if global TP is set
+                    tp_ratio = global_tp / global_sl if global_sl > 0 else 2.0
+                    tp = strategy.calculate_take_profit(last_close, signal_type, ratio=tp_ratio)
 
                     # Avoid duplicate signals within same candle
                     recent = (
@@ -136,6 +156,7 @@ def run_scanner():
                         stop_loss=sl,
                         take_profit=tp,
                         confidence=round(last_confidence, 1),
+                        volatility=round(last_volatility, 2) if last_volatility is not None else None,
                         timeframe=mapping.timeframe,
                         status="active",
                     )
@@ -156,8 +177,9 @@ def run_scanner():
                                 "stop_loss": sl,
                                 "take_profit": tp,
                                 "confidence": round(last_confidence, 1),
+                                "volatility": round(last_volatility, 2) if last_volatility is not None else None,
                                 "timeframe": mapping.timeframe,
-                                "created_at": datetime.utcnow().isoformat(),
+                                "created_at": datetime.utcnow().isoformat() + "Z",
                             }),
                             main_loop
                         )
