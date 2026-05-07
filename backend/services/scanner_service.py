@@ -100,7 +100,7 @@ def run_scanner():
                 df = add_all_indicators(df)
                 df = df.dropna()
 
-                strategy = get_strategy(strategy_obj.name, strategy_obj.parameters)
+                strategy = get_strategy(strategy_obj, strategy_obj.parameters)
                 df = strategy.generate_signals(df)
 
                 last_signal = int(df["signal"].iloc[-1])
@@ -148,6 +148,28 @@ def run_scanner():
                     if recent:
                         continue
 
+                    # --- AI SIGNAL ANALYSIS ---
+                    from services.ai_service import analyze_signal_with_ai
+                    
+                    # Prepare metrics for AI context
+                    metrics_context = {
+                        "rsi": round(float(df["rsi_14"].iloc[-1]), 2) if "rsi_14" in df.columns else "N/A",
+                        "macd": round(float(df["macd"].iloc[-1]), 4) if "macd" in df.columns else "N/A",
+                        "bb_width": round(float(df["bb_width"].iloc[-1]), 2) if "bb_width" in df.columns else "N/A",
+                        "ema_21": round(float(df["ema_21"].iloc[-1]), 2) if "ema_21" in df.columns else "N/A",
+                        "ema_200": round(float(df["ema_200"].iloc[-1]), 2) if "ema_200" in df.columns else "N/A",
+                    }
+
+                    ai_result = analyze_signal_with_ai({
+                        "symbol": coin.symbol,
+                        "signal_type": signal_type,
+                        "price": last_close,
+                        "sl": sl,
+                        "tp": tp,
+                        "strategy": strategy_obj.name,
+                        "metrics": metrics_context
+                    })
+
                     sig = Signal(
                         coin_id=coin.id,
                         strategy_id=strategy_obj.id,
@@ -159,6 +181,8 @@ def run_scanner():
                         volatility=round(last_volatility, 2) if last_volatility is not None else None,
                         timeframe=mapping.timeframe,
                         status="active",
+                        ai_analysis=ai_result.get("analysis"),
+                        ai_score=ai_result.get("score", 50)
                     )
                     db.add(sig)
                     db.flush()
@@ -179,6 +203,8 @@ def run_scanner():
                                 "confidence": round(last_confidence, 1),
                                 "volatility": round(last_volatility, 2) if last_volatility is not None else None,
                                 "timeframe": mapping.timeframe,
+                                "ai_analysis": ai_result.get("analysis"),
+                                "ai_score": ai_result.get("score", 50),
                                 "created_at": datetime.utcnow().isoformat() + "Z",
                             }),
                             main_loop
@@ -186,15 +212,21 @@ def run_scanner():
 
                     # --- SEND TELEGRAM ALERT ---
                     emoji = "🟢" if signal_type == "BUY" else "🔴"
+                    clean_symbol = coin.symbol.split(':')[0].replace('/', '')
+                    tv_url = f"https://www.tradingview.com/chart/?symbol=BINANCE:{clean_symbol}.P"
+                    
                     msg = (
                         f"🚨 <b>CRYPTOEDGE {signal_type} SIGNAL</b> 🚨\n\n"
-                        f"{emoji} <b>Coin:</b> #{coin.symbol.replace('/', '')}\n"
+                        f"{emoji} <b>Coin:</b> #{clean_symbol}\n"
                         f"⏱ <b>Timeframe:</b> {mapping.timeframe}\n"
                         f"📈 <b>Strategy:</b> {strategy_obj.name}\n"
                         f"🎯 <b>Price:</b> {last_close}\n\n"
+                        f"🤖 <b>AI Analysis:</b> {ai_result.get('analysis')}\n"
+                        f"📊 <b>AI Score:</b> {ai_result.get('score')}/100\n\n"
                         f"🛑 <b>SL:</b> {sl}\n"
                         f"✅ <b>TP:</b> {tp}\n\n"
-                        f"🔥 <i>Confidence: {round(last_confidence, 1)}%</i>"
+                        f"🔥 <i>Confidence: {round(last_confidence, 1)}%</i>\n\n"
+                        f"🔗 <a href='{tv_url}'>View on TradingView</a>"
                     )
                     send_telegram_message(msg)
 

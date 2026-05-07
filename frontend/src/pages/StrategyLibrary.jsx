@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, X, Trash2, LayoutGrid, Search, Filter, ChevronDown, ChevronUp, Download, Play, Activity } from 'lucide-react'
+import { Plus, X, Trash2, LayoutGrid, Search, Filter, ChevronDown, ChevronUp, Download, Play, Activity, Settings, RefreshCw, BarChart2 } from 'lucide-react'
 import { API } from '../lib/api'
 import StrategyCard from '../components/StrategyCard'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -18,6 +18,98 @@ function saveLocalStrategy(s) {
     const updated = [{ ...s, id: `local_${Date.now()}`, coin_count: 0, avg_win_rate: 0 }, ...existing]
     localStorage.setItem(LOCAL_KEY, JSON.stringify(updated))
     return updated
+}
+function deleteLocalStrategy(id) {
+    const existing = loadLocalStrategies()
+    const updated = existing.filter(s => s.id !== id)
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(updated))
+    return updated
+}
+
+// ─── Admin Debug Panel ───────────────────────────────────────────
+function DebugPanel({ onClose }) {
+    const [allStrategies, setAllStrategies] = useState([])
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState('')
+
+    useEffect(() => {
+        API.getAllStrategies()
+            .then(data => setAllStrategies(data.strategies || []))
+            .catch(err => setError(err?.response?.data?.detail || 'Failed to load'))
+            .finally(() => setLoading(false))
+    }, [])
+
+    const handleReactivate = async (id) => {
+        try {
+            await API.reactivateStrategy(id)
+            const data = await API.getAllStrategies()
+            setAllStrategies(data.strategies || [])
+            toast.success('Strategy reactivated!')
+        } catch (err) {
+            toast.error('Failed to reactivate')
+        }
+    }
+
+    const handleDelete = async (id) => {
+        if (!window.confirm('Delete this strategy permanently?')) return
+        try {
+            await API.deleteStrategy(id)
+            setAllStrategies(prev => prev.filter(s => s.id !== id))
+            toast.success('Strategy deleted!')
+        } catch (err) {
+            toast.error('Failed to delete')
+        }
+    }
+
+    return (
+        <div style={{
+            position: 'fixed', inset: 0, zIndex: 200,
+            background: 'rgba(9,14,26,0.92)', backdropFilter: 'blur(6px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+            <div className="card" style={{ width: 600, maxHeight: '80vh', overflow: 'auto', padding: 24 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <h3 style={{ margin: 0, color: 'var(--text-primary)' }}>All Strategies (Debug)</h3>
+                    <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)' }}><X size={18} /></button>
+                </div>
+                {loading ? <LoadingSpinner text="Loading..." /> : error ? <div style={{ color: 'var(--red)' }}>{error}</div> : (
+                    <div>
+                        {allStrategies.length === 0 ? <div style={{ color: 'var(--text-dim)' }}>No strategies found</div> : (
+                            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                <thead>
+                                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                                        <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-dim)', fontSize: 11 }}>ID</th>
+                                        <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-dim)', fontSize: 11 }}>Name</th>
+                                        <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-dim)', fontSize: 11 }}>Status</th>
+                                        <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-dim)', fontSize: 11 }}>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {allStrategies.map(s => (
+                                        <tr key={s.id} style={{ borderBottom: '1px solid var(--border)', background: s.is_active ? 'transparent' : 'rgba(255,51,102,0.1)' }}>
+                                            <td style={{ padding: '8px', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{s.id}</td>
+                                            <td style={{ padding: '8px' }}>{s.name}</td>
+                                            <td style={{ padding: '8px' }}>
+                                                <span style={{ padding: '2px 8px', borderRadius: 4, background: s.is_active ? 'rgba(0,255,170,0.2)' : 'rgba(255,51,102,0.2)', color: s.is_active ? 'var(--green)' : 'var(--red)', fontSize: 11 }}>
+                                                    {s.is_active ? 'Active' : 'Inactive'}
+                                                </span>
+                                            </td>
+                                            <td style={{ padding: '8px' }}>
+                                                {!s.is_active && (
+                                                    <button onClick={() => handleReactivate(s.id)} style={{ marginRight: 8, padding: '4px 10px', fontSize: 11 }} className="btn-primary">Reactivate</button>
+                                                )}
+                                                <button onClick={() => handleDelete(s.id)} style={{ padding: '4px 10px', fontSize: 11 }} className="btn-ghost">Delete</button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+                    </div>
+                )}
+            </div>
+        </div>
+    )
 }
 
 // ─── Add Strategy Modal ────────────────────────────────────────
@@ -51,7 +143,13 @@ function AddStrategyModal({ onClose, onSave, isOffline }) {
         const parameters = {}
         params.filter(p => p.key.trim()).forEach(p => { parameters[p.key.trim()] = p.value })
 
-        const payload = { ...form, parameters }
+        // Only send fields expected by the backend API
+        const payload = {
+            name: form.name.trim(),
+            description: form.description.trim() || null,
+            pine_script: form.pine_script.trim() || null,
+            parameters: Object.keys(parameters).length > 0 ? parameters : null,
+        }
         setSaving(true)
         try {
             await onSave(payload)
@@ -257,7 +355,8 @@ function BacktestProgressModal({ strategyName, jobId, onClose, onComplete }) {
 
 // ─── Results Table ──────────────────────────────────────────────
 function StrategyResultsTable({ strategyId }) {
-    const { data: tableData, isLoading } = useQuery({
+    const qc = useQueryClient()
+    const { data: tableData, isLoading, isRefetching } = useQuery({
         queryKey: ['backtestTable', strategyId],
         queryFn: () => API.getBacktestTable(strategyId),
         enabled: !!strategyId && !String(strategyId).startsWith('local_'),
@@ -292,12 +391,12 @@ function StrategyResultsTable({ strategyId }) {
     }
 
     const filtered = useMemo(() => {
-        if (!tableData) return []
+        if (!tableData || !Array.isArray(tableData)) return []
         return tableData.filter(row => {
-            if (search && !row.coin.toLowerCase().includes(search.toLowerCase())) return false
-            if (row.best_win_rate < minWr) return false
-            if (tfFilter !== 'ALL' && row.best_timeframe !== tfFilter) return false
-            return true
+            const coinMatch = !search || row.coin.toLowerCase().includes(search.toLowerCase())
+            const wrMatch = (row.best_win_rate || 0) >= minWr
+            const tfMatch = tfFilter === 'ALL' || row.best_timeframe === tfFilter
+            return coinMatch && wrMatch && tfMatch
         }).sort((a, b) => {
             let va, vb;
             if (sortCol === 'COIN') { va = a.coin; vb = b.coin; }
@@ -305,7 +404,7 @@ function StrategyResultsTable({ strategyId }) {
                 va = a.results[sortCol]?.win_rate || 0; vb = b.results[sortCol]?.win_rate || 0;
             }
             else if (sortCol === 'BEST TF') { va = a.best_timeframe || ''; vb = b.best_timeframe || ''; }
-            else if (sortCol === 'BEST WIN%') { va = a.best_win_rate; vb = b.best_win_rate; }
+            else if (sortCol === 'BEST WIN%') { va = a.best_win_rate || 0; vb = b.best_win_rate || 0; }
             else if (sortCol === 'TRADES') { va = a.results[a.best_timeframe]?.trades || 0; vb = b.results[b.best_timeframe]?.trades || 0; }
             else if (sortCol === 'RETURN%') { va = a.results[a.best_timeframe]?.return_pct || 0; vb = b.results[b.best_timeframe]?.return_pct || 0; }
             else if (sortCol === 'DRAWDOWN') { va = a.results[a.best_timeframe]?.drawdown || 0; vb = b.results[b.best_timeframe]?.drawdown || 0; }
@@ -319,7 +418,7 @@ function StrategyResultsTable({ strategyId }) {
     const totalPages = Math.ceil(filtered.length / ROWS_PER_PAGE)
     const pageData = filtered.slice((page - 1) * ROWS_PER_PAGE, page * ROWS_PER_PAGE)
 
-    const thStyle = { fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)', padding: '12px 16px', textAlign: 'left', cursor: 'pointer', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }
+    const thStyle = { fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)', padding: '12px 16px', textAlign: 'left', cursor: 'pointer', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }
     const tdStyle = { fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-primary)', padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.02)', whiteSpace: 'nowrap' }
 
     const renderCell = (wr) => {
@@ -331,42 +430,53 @@ function StrategyResultsTable({ strategyId }) {
         return <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, background: bg, color, fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>{wr.toFixed(1)}%</span>
     }
 
-    if (isLoading) return <LoadingSpinner text="Loading backtest results..." />
+    if (isLoading) return (
+        <div className="card" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <LoadingSpinner text="Loading backtest matrix..." />
+        </div>
+    )
+
     if (!tableData || tableData.length === 0) return (
-        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-            No results found. Please run a backtest first.
+        <div className="card" style={{ flex: 1, textAlign: 'center', padding: '40px', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 15 }}>
+            <BarChart2 size={48} opacity={0.2} />
+            <div>No backtest data found for this strategy.</div>
+            <button className="btn-ghost" onClick={() => qc.invalidateQueries(['backtestTable', strategyId])}>Check Again</button>
         </div>
     )
 
     return (
-        <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'rgba(0,0,0,0.2)' }}>
             {/* Toolbar */}
-            <div style={{ display: 'flex', gap: 16, padding: '16px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-secondary)', borderRadius: 6, padding: '0 10px', flex: '1 1 200px' }}>
+            <div style={{ display: 'flex', gap: 16, padding: '12px 16px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', alignItems: 'center', background: 'rgba(255,255,255,0.01)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-secondary)', borderRadius: 8, padding: '0 12px', flex: '1 1 200px', border: '1px solid var(--border)' }}>
                     <Search size={14} color="var(--text-dim)" />
-                    <input className="cyber-input" value={search} onChange={e => { setSearch(e.target.value); setPage(1) }} placeholder="Search coins..." style={{ border: 'none', background: 'transparent' }} />
+                    <input value={search} onChange={e => { setSearch(e.target.value); setPage(1) }} placeholder="Filter by coin..." style={{ border: 'none', background: 'transparent', color: 'white', padding: '8px 10px', fontSize: 13, outline: 'none', width: '100%' }} />
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-secondary)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)' }}>
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)' }}>MIN WIN%</span>
-                    <input type="range" min="0" max="80" step="5" value={minWr} onChange={e => { setMinWr(Number(e.target.value)); setPage(1) }} style={{ width: 100 }} />
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, width: 30 }}>{minWr}%</span>
+                    <input type="range" min="0" max="80" step="5" value={minWr} onChange={e => { setMinWr(Number(e.target.value)); setPage(1) }} style={{ width: 80 }} />
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, width: 30, color: 'var(--cyan)' }}>{minWr}%</span>
                 </div>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)' }}>BEST TF</span>
-                    <select className="cyber-input" value={tfFilter} onChange={e => { setTfFilter(e.target.value); setPage(1) }} style={{ width: 80, padding: '4px 8px' }}>
-                        <option value="ALL">ALL</option>
+                    <select className="cyber-input" value={tfFilter} onChange={e => { setTfFilter(e.target.value); setPage(1) }} style={{ width: 80, padding: '6px 8px', height: 'auto' }}>
+                        <option value="ALL">ALL TF</option>
                         {TF_OPTIONS.map(tf => <option key={tf} value={tf}>{tf}</option>)}
                     </select>
                 </div>
-                <button className="btn-ghost" onClick={exportCsv} style={{ marginLeft: 'auto', padding: '6px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Download size={14} /> Export CSV
-                </button>
+                <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+                    <button className="btn-ghost" onClick={() => qc.invalidateQueries(['backtestTable', strategyId])} style={{ padding: '6px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <RefreshCw size={14} className={isRefetching ? "animate-spin" : ""} />
+                    </button>
+                    <button className="btn-ghost" onClick={exportCsv} style={{ padding: '6px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Download size={14} /> Export
+                    </button>
+                </div>
             </div>
 
             {/* Table wrapper */}
-            <div style={{ flex: 1, overflow: 'auto' }}>
+            <div style={{ flex: 1, overflow: 'auto' }} className="custom-scrollbar">
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
+                    <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
                         <tr>
                             {['COIN', 'STRATEGY', '5m', '15m', '1h', '2h', '4h', '1d', 'BEST TF', 'BEST WIN%', 'TRADES', 'RETURN%', 'DRAWDOWN'].map(col => (
                                 <th key={col} style={thStyle} onClick={() => handleSort(col)}>
@@ -379,16 +489,22 @@ function StrategyResultsTable({ strategyId }) {
                         </tr>
                     </thead>
                     <tbody>
-                        {pageData.map((row, i) => {
+                        {pageData.length === 0 ? (
+                            <tr>
+                                <td colSpan={13} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+                                    No results match your filters.
+                                </td>
+                            </tr>
+                        ) : pageData.map((row, i) => {
                             const isBest = row.best_win_rate >= 65;
                             const isWorst = row.best_win_rate < 40;
                             const borderLeft = isBest ? '3px solid var(--green)' : isWorst ? '3px solid var(--red)' : '3px solid transparent';
                             const bestRes = row.results[row.best_timeframe] || {};
 
                             return (
-                                <tr key={row.coin} style={{ background: i % 2 === 0 ? 'var(--bg-primary)' : 'var(--bg-secondary)', borderLeft }}>
-                                    <td style={{ ...tdStyle, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{row.coin}</td>
-                                    <td style={{ ...tdStyle, color: 'var(--text-secondary)' }}>{row.strategy}</td>
+                                <tr key={`${row.coin}-${row.strategy_id}`} style={{ background: i % 2 === 0 ? 'rgba(255,255,255,0.01)' : 'transparent', borderLeft }}>
+                                    <td style={{ ...tdStyle, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--cyan)' }}>{row.coin}</td>
+                                    <td style={{ ...tdStyle, color: 'var(--text-secondary)', fontSize: 11 }}>{row.strategy}</td>
                                     <td style={tdStyle}>{renderCell(row.results['5m']?.win_rate)}</td>
                                     <td style={tdStyle}>{renderCell(row.results['15m']?.win_rate)}</td>
                                     <td style={tdStyle}>{renderCell(row.results['1h']?.win_rate)}</td>
@@ -398,10 +514,10 @@ function StrategyResultsTable({ strategyId }) {
                                     <td style={{ ...tdStyle, color: 'var(--cyan)', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{row.best_timeframe || '—'}</td>
                                     <td style={tdStyle}>{renderCell(row.best_win_rate)}</td>
                                     <td style={{ ...tdStyle, fontFamily: 'var(--font-mono)' }}>{bestRes.trades || 0}</td>
-                                    <td style={{ ...tdStyle, fontFamily: 'var(--font-mono)', color: bestRes.return_pct > 0 ? 'var(--green)' : 'var(--text-dim)' }}>
+                                    <td style={{ ...tdStyle, fontFamily: 'var(--font-mono)', color: bestRes.return_pct > 0 ? 'var(--green)' : bestRes.return_pct < 0 ? 'var(--red)' : 'var(--text-dim)' }}>
                                         {bestRes.return_pct ? `${bestRes.return_pct > 0 ? '+' : ''}${bestRes.return_pct.toFixed(2)}%` : '—'}
                                     </td>
-                                    <td style={{ ...tdStyle, fontFamily: 'var(--font-mono)' }}>{bestRes.drawdown ? `-${bestRes.drawdown.toFixed(2)}%` : '—'}</td>
+                                    <td style={{ ...tdStyle, fontFamily: 'var(--font-mono)', color: 'var(--red-dim)' }}>{bestRes.drawdown ? `-${bestRes.drawdown.toFixed(2)}%` : '—'}</td>
                                 </tr>
                             )
                         })}
@@ -410,15 +526,46 @@ function StrategyResultsTable({ strategyId }) {
             </div>
 
             {/* Pagination & Footer */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', borderTop: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 20px', borderTop: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)' }}>
-                    Showing {Math.min(filtered.length, (page - 1) * ROWS_PER_PAGE + 1)} - {Math.min(filtered.length, page * ROWS_PER_PAGE)} of {filtered.length} results
+                    {filtered.length > 0 ? `Showing ${Math.min(filtered.length, (page - 1) * ROWS_PER_PAGE + 1)} - ${Math.min(filtered.length, page * ROWS_PER_PAGE)} of ${filtered.length} matches` : '0 matches'}
                 </div>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <button className="btn-ghost" disabled={page === 1} onClick={() => setPage(page - 1)} style={{ padding: '4px 10px', fontSize: 12 }}>Prev</button>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-primary)' }}>{page} / {totalPages || 1}</span>
-                    <button className="btn-ghost" disabled={page === totalPages || totalPages === 0} onClick={() => setPage(page + 1)} style={{ padding: '4px 10px', fontSize: 12 }}>Next</button>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <button className="btn-ghost" disabled={page === 1} onClick={() => setPage(page - 1)} style={{ padding: '4px 12px', fontSize: 12 }}>Prev</button>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-primary)', fontWeight: 700 }}>{page} / {totalPages || 1}</span>
+                    <button className="btn-ghost" disabled={page === totalPages || totalPages === 0} onClick={() => setPage(page + 1)} style={{ padding: '4px 12px', fontSize: 12 }}>Next</button>
                 </div>
+            </div>
+        </div>
+    )
+}
+
+
+// ─── Strategy Table Modal (New Window) ──────────────────────────
+function StrategyTableModal({ strategy, onClose }) {
+    if (!strategy) return null
+    return (
+        <div style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(9,14,26,0.98)', backdropFilter: 'blur(10px)',
+            display: 'flex', flexDirection: 'column', padding: '20px'
+        }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 12, background: 'rgba(0,229,255,0.1)', border: '1px solid var(--cyan-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <BarChart2 size={24} color="var(--cyan)" />
+                    </div>
+                    <div>
+                        <h2 style={{ margin: 0, fontSize: 22, color: 'var(--text-primary)' }}>{strategy.name} — Performance Matrix</h2>
+                        <div style={{ fontSize: 12, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>DETAILED MULTI-TIMEFRAME BACKTEST RESULTS</div>
+                    </div>
+                </div>
+                <button onClick={onClose} className="btn-ghost" style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+                    <X size={20} /> Close Results
+                </button>
+            </div>
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                <StrategyResultsTable strategyId={strategy.id} />
             </div>
         </div>
     )
@@ -428,7 +575,9 @@ function StrategyResultsTable({ strategyId }) {
 // ─── Main page ─────────────────────────────
 export default function StrategyLibrary() {
     const [showModal, setShowModal] = useState(false)
+    const [showDebugPanel, setShowDebugPanel] = useState(false)
     const [selectedStrategy, setSelectedStrategy] = useState(null)
+    const [showTableModal, setShowTableModal] = useState(false)
     const [localStrategies, setLocalStrategies] = useState(loadLocalStrategies)
     const [jobProgress, setJobProgress] = useState(null)
 
@@ -458,10 +607,44 @@ export default function StrategyLibrary() {
         } else {
             try {
                 await createStrategy(payload)
-            } catch {
-                const updated = saveLocalStrategy(payload)
-                setLocalStrategies(updated)
-                toast('Saved locally (backend error)', { icon: '⚠️' })
+            } catch (err) {
+                // Our Flask backend returns {status, message}. FastAPI uses {detail}.
+                const data = err?.response?.data || {}
+                const errorMsg = data.message || data.detail || err.message || 'Backend error'
+                const statusCode = err?.response?.status
+
+                console.error('Strategy creation failed:', errorMsg)
+
+                if (statusCode === 400) {
+                    // Validation error (e.g. duplicate name) — don't save locally, just show the error
+                    toast.error(errorMsg, { icon: '❌' })
+                    throw err // Re-throw so modal stays open
+                } else {
+                    // Unexpected server error — save locally as fallback
+                    const updated = saveLocalStrategy(payload)
+                    setLocalStrategies(updated)
+                    toast.error(`Saved locally — ${errorMsg}`, { icon: '⚠️' })
+                }
+            }
+        }
+    }
+
+    const handleDelete = async (id) => {
+        if (!window.confirm('Delete this strategy?')) return
+        
+        if (String(id).startsWith('local_')) {
+            const updated = deleteLocalStrategy(id)
+            setLocalStrategies(updated)
+            if (selectedStrategy?.id === id) setSelectedStrategy(null)
+            toast.success('Local strategy deleted')
+        } else {
+            try {
+                await API.deleteStrategy(id)
+                qc.invalidateQueries(['strategies'])
+                if (selectedStrategy?.id === id) setSelectedStrategy(null)
+                toast.success('Strategy deleted')
+            } catch (err) {
+                toast.error('Failed to delete strategy')
             }
         }
     }
@@ -485,7 +668,12 @@ export default function StrategyLibrary() {
     const allStrategies = [...serverStrategies, ...localStrategies]
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 14 }}>
+        <div style={{ 
+            display: 'flex', 
+            flexDirection: 'column', 
+            height: 'calc(100vh - 120px)', 
+            gap: 20, 
+        }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
                 <div>
                     <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 20, color: 'var(--text-primary)' }}>Strategy Library & Results</div>
@@ -493,27 +681,37 @@ export default function StrategyLibrary() {
                         {allStrategies.length} strategies {localStrategies.length > 0 && <span style={{ color: 'var(--yellow)', marginLeft: 6 }}>· {localStrategies.length} local</span>}
                     </div>
                 </div>
-                <button className="btn-primary" onClick={() => setShowModal(true)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Plus size={14} />Add Strategy
-                </button>
+                <div style={{ display: 'flex', gap: 10 }}>
+                    <button className="btn-ghost" onClick={() => qc.invalidateQueries(['strategies'])} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                        <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} /> Sync
+                    </button>
+                    <button className="btn-primary" onClick={() => setShowModal(true)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Plus size={14} />Add Strategy
+                    </button>
+                </div>
             </div>
 
             {isLoading ? (
-                <LoadingSpinner text="Loading strategies..." />
+                <LoadingSpinner text="Loading..." />
             ) : (
-                <div style={{
-                    display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 8, flexShrink: 0,
-                    scrollSnapType: 'x mandatory', msOverflowStyle: 'none', scrollbarWidth: 'none'
-                }}>
+                <div style={{ 
+                    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 20, 
+                    overflowY: 'auto', paddingRight: 10
+                }} className="custom-scrollbar">
                     {allStrategies.map((s, idx) => (
-                        <div key={s.id || idx} style={{ flex: '0 0 auto', width: 320, scrollSnapAlign: 'start' }}>
+                        <div key={s.id || idx}>
                             <StrategyCard
                                 strategy={{
                                     ...s,
                                     name: String(s.id).startsWith('local_') ? `${s.name} ⚡` : s.name,
                                 }}
                                 onClick={() => setSelectedStrategy(s)}
+                                onViewTable={() => {
+                                    setSelectedStrategy(s)
+                                    setShowTableModal(true)
+                                }}
                                 onRunBacktest={handleRunBacktest}
+                                onDelete={handleDelete}
                             />
                         </div>
                     ))}
@@ -535,26 +733,7 @@ export default function StrategyLibrary() {
                 </div>
             )}
 
-            {/* Comprehensive Data Table Area */}
-            {selectedStrategy && !String(selectedStrategy.id).startsWith('local_') ? (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                    <div style={{ marginBottom: 10, fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 16, color: 'var(--cyan)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Activity size={16} />
-                        Detailed Multi-Timeframe Results for {selectedStrategy.name}
-                        <button className="btn-ghost" onClick={() => setSelectedStrategy(null)} style={{ marginLeft: 'auto', padding: '4px 8px', fontSize: 11 }}>Close Table</button>
-                    </div>
-                    <StrategyResultsTable strategyId={selectedStrategy.id} />
-                </div>
-            ) : selectedStrategy ? (
-                <div className="card" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-dim)', flex: 1 }}>
-                    ⚡ Local strategy — sync with backend to run backtests and view results matrix.
-                </div>
-            ) : (
-                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, color: 'var(--text-dim)', border: '1px dashed var(--border)', borderRadius: 12 }}>
-                    <LayoutGrid size={32} opacity={0.5} />
-                    <div style={{ fontFamily: 'var(--font-sans)', fontSize: 14 }}>Select "View Table" on any strategy above to expand full multi-timeframe backtest results.</div>
-                </div>
-            )}
+            {showTableModal && <StrategyTableModal strategy={selectedStrategy} onClose={() => setShowTableModal(false)} />}
 
             {showModal && <AddStrategyModal onClose={() => setShowModal(false)} onSave={handleSave} isOffline={isOffline} />}
 
@@ -569,6 +748,7 @@ export default function StrategyLibrary() {
                         // Wait 800ms for DB writes to fully commit, then force fresh fetch
                         setTimeout(() => {
                             qc.invalidateQueries(['strategies'])
+                            qc.invalidateQueries(['backtestSummary'])
                             qc.invalidateQueries(['backtestTable'])
                             qc.refetchQueries(['backtestTable'])
                             if (strategyToSelect) {

@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useState, useCallback, useEffect } from 'react'
-import { Scan, Zap, TrendingUp, BarChart2, Star } from 'lucide-react'
+import { Scan, Zap, TrendingUp, TrendingDown, BarChart2, Star, Activity } from 'lucide-react'
 import { API } from '../lib/api'
 import { useSignalSocket } from '../lib/socket'
 import StatCard from '../components/StatCard'
@@ -12,8 +12,11 @@ import toast from 'react-hot-toast'
 const EMPTY_STATS = {
     total_coins_scanning: 0,
     active_signals: 0,
-    today_signals: 0,
+    today_total_signals: 0,
+    today_wins: 0,
+    today_losses: 0,
     today_win_rate: 0,
+    today_loss_rate: 0,
     total_return: 0,
     top_performing_coins: [],
     bot_status: 'stopped',
@@ -72,10 +75,22 @@ export default function Dashboard() {
             icon: Zap, color: 'yellow',
         },
         {
-            label: "Today Win Rate",
+            label: 'Today Win %',
             value: statsLoading ? null : statsError ? '—' : `${s.today_win_rate}%`,
-            sub: statsError ? '—' : `${s.today_signals} signals today`,
+            sub: statsError ? '—' : `${s.today_wins} wins today`,
             icon: TrendingUp, color: 'green',
+        },
+        {
+            label: 'Today Loss %',
+            value: statsLoading ? null : statsError ? '—' : `${s.today_loss_rate}%`,
+            sub: statsError ? '—' : `${s.today_losses} losses today`,
+            icon: TrendingDown, color: 'red',
+        },
+        {
+            label: 'Today Signals',
+            value: statsLoading ? null : statsError ? '—' : String(s.today_total_signals),
+            sub: statsError ? '—' : 'Total signals today',
+            icon: Activity, color: 'cyan',
         },
         {
             label: 'Avg Return',
@@ -95,7 +110,7 @@ export default function Dashboard() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, height: '100%', overflow: 'hidden' }}>
 
             {/* Stats Row */}
-            <div style={{ display: 'flex', gap: 10, flexShrink: 0 }}>
+            <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
                 {statCards.map((card) => (
                     <StatCard
                         key={card.label}

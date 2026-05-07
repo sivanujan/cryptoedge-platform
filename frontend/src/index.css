@@ -28,8 +28,8 @@
   --text-secondary: #8899bb;
   --text-dim: #4a5a7a;
 
-  --font-mono: 'Space Mono', 'Courier New', monospace;
-  --font-sans: 'Syne', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
 * {
@@ -47,7 +47,10 @@ body,
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Custom Scrollbar */
@@ -197,12 +200,57 @@ body,
 
 @keyframes shimmer {
   0% {
-    background-position: 200% 0;
-  }
-
-  100% {
     background-position: -200% 0;
   }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 50%, var(--bg-secondary) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+  border-radius: 4px;
+}
+
+@keyframes price-flash-green {
+  0% { background: transparent; }
+  50% { background: rgba(0, 230, 118, 0.2); }
+  100% { background: transparent; }
+}
+
+@keyframes price-flash-red {
+  0% { background: transparent; }
+  50% { background: rgba(255, 23, 68, 0.2); }
+  100% { background: transparent; }
+}
+
+.flash-up {
+  animation: price-flash-green 0.8s ease-out;
+}
+
+.flash-down {
+  animation: price-flash-red 0.8s ease-out;
+}
+
+.accent-border-long {
+  border-left: 3px solid var(--green) !important;
+}
+
+.accent-border-short {
+  border-left: 3px solid var(--red) !important;
+}
+
+.hover-actions {
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 0.2s ease-in-out;
+}
+
+.card:hover .hover-actions {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .animate-fade-in {
@@ -370,4 +418,51 @@ body,
   color: var(--cyan);
   background: rgba(0, 229, 255, 0.08);
   border-right: 2px solid var(--cyan);
+}
+
+/* Spin animation */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Deep Analysis / AI Hub Specifics */
+@keyframes ai-fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ai-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.ai-fade-in {
+  animation: ai-fade-in 0.3s ease-out forwards;
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  animation: ai-bounce 1s infinite;
+}
+
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.hover-bright:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: white !important;
 }

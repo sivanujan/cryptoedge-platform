@@ -139,6 +139,7 @@ export default function BacktestResults() {
         },
         { key: 'max_drawdown', label: 'Drawdown', render: v => <span style={{ color: 'var(--red)' }}>{(Number(v) || 0).toFixed(2)}%</span> },
         { key: 'sharpe_ratio', label: 'Sharpe', render: v => <span style={{ color: 'var(--text-secondary)' }}>{(Number(v) || 0).toFixed(3)}</span> },
+        { key: 'volatility', label: 'Volatility', render: v => <span style={{ color: 'var(--text-secondary)' }}>{(Number(v) || 0).toFixed(2)}%</span> },
     ]
 
     return (

@@ -39,5 +39,6 @@ def get_db():
 
 def init_db():
     """Create all tables if they don't exist."""
-    from database.models import Base as ModelsBase  # noqa: F401
-    ModelsBase.metadata.create_all(bind=engine)
+    from database import models  # noqa: F401 — registers Coin, Strategy, Signal, etc.
+    from database import scanner_models  # noqa: F401 — registers BreakoutSignal, ScannerRun
+    Base.metadata.create_all(bind=engine)

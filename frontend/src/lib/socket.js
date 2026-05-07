@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 
 // Use relative path via Vite proxy so WS goes through the same host/port
 function getWsUrl(path) {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    return `${protocol}//${window.location.host}${path}`
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}${path}`;
 }
 
 function createReconnectingWs(path, onMessage, onOpen, onClose) {

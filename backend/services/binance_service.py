@@ -1,6 +1,7 @@
 import os
 import logging
-from typing import List, Optional
+import requests
+from typing import List, Optional, Dict
 import ccxt
 import pandas as pd
 from dotenv import load_dotenv
@@ -89,28 +90,96 @@ def get_ohlcv(symbol: str, timeframe: str = "1h", limit: int = 1000) -> Optional
 
 def get_current_price(symbol: str) -> Optional[float]:
     """Get latest ticker price for a symbol."""
+    ticker = get_ticker_info(symbol)
+    return ticker.get("last") if ticker else None
+
+
+def get_ticker_info(symbol: str) -> Optional[Dict]:
+    """Get full ticker data for a symbol (last price, 24h change, etc)."""
     try:
         exchange = get_exchange()
         ticker = exchange.fetch_ticker(symbol)
-        return float(ticker["last"])
+        return {
+            "last": float(ticker["last"]),
+            "percentage": float(ticker.get("percentage", 0)),
+            "high": float(ticker.get("high", 0)),
+            "low": float(ticker.get("low", 0)),
+            "quoteVolume": float(ticker.get("quoteVolume", 0)),
+        }
     except Exception as e:
-        logger.warning(f"Error fetching price for {symbol}: {e}")
+        logger.warning(f"Error fetching ticker for {symbol}: {e}")
         return None
 
 
+def _to_binance_futures_symbol(ccxt_symbol: str) -> str:
+    """Convert CCXT symbol like 'BTC/USDT:USDT' → 'BTCUSDT' for Binance FAPI."""
+    # Remove ':USDT' suffix, then remove '/'
+    return ccxt_symbol.split(":")[0].replace("/", "")
+
+
 def get_multiple_prices(symbols: List[str]) -> dict:
-    """Get prices for multiple symbols efficiently."""
+    """Get live prices for multiple symbols. Uses Binance FAPI REST for futures, spot exchange for spot."""
+    if not symbols:
+        return {}
+
+    futures_symbols = [s for s in symbols if ":" in s]
+    spot_symbols   = [s for s in symbols if ":" not in s]
     prices = {}
-    try:
-        exchange = get_exchange()
-        tickers = exchange.fetch_tickers(symbols)
-        for symbol, ticker in tickers.items():
-            prices[symbol] = float(ticker.get("last", 0))
-    except Exception as e:
-        logger.warning(f"Error fetching multiple prices: {e}")
-        # Fallback: fetch one by one
-        for symbol in symbols:
-            price = get_current_price(symbol)
-            if price:
-                prices[symbol] = price
+
+    # ── Futures via Binance FAPI REST (fast, no auth needed) ─────────────────
+    if futures_symbols:
+        try:
+            resp = requests.get(
+                "https://fapi.binance.com/fapi/v1/ticker/price",
+                timeout=5
+            )
+            resp.raise_for_status()
+            all_fapi = {item["symbol"]: float(item["price"]) for item in resp.json()}
+
+            for ccxt_sym in futures_symbols:
+                binance_sym = _to_binance_futures_symbol(ccxt_sym)
+                if binance_sym in all_fapi:
+                    prices[ccxt_sym] = all_fapi[binance_sym]
+                else:
+                    logger.warning(f"Symbol {binance_sym} not found in FAPI prices")
+        except Exception as e:
+            logger.warning(f"FAPI bulk price fetch failed: {e}. Falling back to CCXT...")
+            # CCXT fallback for futures
+            try:
+                exchange = get_swap_exchange()
+                tickers = exchange.fetch_tickers(futures_symbols)
+                for sym, ticker in tickers.items():
+                    if ticker.get("last"):
+                        prices[sym] = float(ticker["last"])
+            except Exception as e2:
+                logger.error(f"CCXT swap fallback also failed: {e2}")
+                for symbol in futures_symbols:
+                    try:
+                        exchange = get_swap_exchange()
+                        ticker = exchange.fetch_ticker(symbol)
+                        if ticker.get("last"):
+                            prices[symbol] = float(ticker["last"])
+                    except Exception:
+                        pass
+
+    # ── Spot via CCXT ─────────────────────────────────────────────────────────
+    if spot_symbols:
+        try:
+            exchange = get_exchange()
+            tickers = exchange.fetch_tickers(spot_symbols)
+            for sym, ticker in tickers.items():
+                if ticker.get("last"):
+                    prices[sym] = float(ticker["last"])
+        except Exception as e:
+            logger.warning(f"Spot bulk price fetch failed: {e}")
+            for symbol in spot_symbols:
+                try:
+                    ticker = get_exchange().fetch_ticker(symbol)
+                    if ticker.get("last"):
+                        prices[symbol] = float(ticker["last"])
+                except Exception:
+                    pass
+
+    logger.info(f"Fetched prices for {len(prices)}/{len(symbols)} symbols")
     return prices
+

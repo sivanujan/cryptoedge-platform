@@ -1,13 +1,41 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Filter, X, ExternalLink, ArrowUpRight, ArrowDownRight, Target, ShieldAlert, History, Trash2, Zap } from 'lucide-react'
+import { Filter, X, ExternalLink, ArrowUpRight, ArrowDownRight, Target, ShieldAlert, History, Trash2, Zap, Cpu } from 'lucide-react'
 import { API } from '../lib/api'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 function SignalDetailsModal({ signal, onClose }) {
     if (!signal) return null
 
-    const pnl = signal.pnl_percent || 0
+    // Auto-refresh timer for live signals
+    const [livePrice, setLivePrice] = useState(signal.current_price)
+    const [livePnl, setLivePnl] = useState(signal.pnl_percent)
+    const [isRefreshing, setIsRefreshing] = useState(false)
+
+    useEffect(() => {
+        if (signal.status !== 'active') return
+
+        const interval = setInterval(async () => {
+            setIsRefreshing(true)
+            try {
+                const res = await API.getSignal(signal.id)
+                if (res.signal) {
+                    setLivePrice(res.signal.current_price)
+                    setLivePnl(res.signal.pnl_percent)
+                }
+            } catch (e) {
+                console.error("Auto-refresh failed", e)
+            } finally {
+                setTimeout(() => setIsRefreshing(false), 1000)
+            }
+        }, 10000)
+
+        return () => clearInterval(interval)
+    }, [signal.id, signal.status, signal.symbol])
+
+    const currentPrice = livePrice ?? signal.current_price
+    const currentPnl = livePnl ?? signal.pnl_percent
+    const pnl = currentPnl || 0
     const isSuccess = signal.status === 'closed' || pnl > 0
     const color = isSuccess ? 'var(--green)' : 'var(--red)'
 
@@ -30,7 +58,10 @@ function SignalDetailsModal({ signal, onClose }) {
                         <Target size={24} color="var(--cyan)" />
                     </div>
                     <div>
-                        <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>{signal.symbol}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>{signal.symbol}</div>
+                            {isRefreshing && <div className="live-dot" style={{ width: 6, height: 6 }} />}
+                        </div>
                         <div style={{ fontSize: 12, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{signal.strategy} · {signal.timeframe}</div>
                     </div>
                     <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
@@ -43,9 +74,20 @@ function SignalDetailsModal({ signal, onClose }) {
                         <div style={{ fontSize: 10, color: 'var(--text-dim)', letterSpacing: '0.05em', marginBottom: 4 }}>ENTRY PRICE</div>
                         <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{fmt(signal.entry_price)}</div>
                     </div>
-                    <div className="card" style={{ padding: 16, background: 'rgba(255,255,255,0.03)' }}>
-                        <div style={{ fontSize: 10, color: 'var(--text-dim)', letterSpacing: '0.05em', marginBottom: 4 }}>CURRENT PRICE</div>
-                        <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--cyan)' }}>{fmt(signal.current_price || signal.entry_price)}</div>
+                    <div className="card" style={{ padding: 16, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                            <div style={{ fontSize: 10, color: 'var(--text-dim)', letterSpacing: '0.05em' }}>CURRENT PRICE</div>
+                            {signal.status === 'active' && currentPrice && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    <div className="live-dot" style={{ width: 6, height: 6 }} />
+                                    <span style={{ fontSize: 9, color: 'var(--green)', fontWeight: 700 }}>LIVE</span>
+                                </div>
+                            )}
+                        </div>
+                        <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-mono)', color: (currentPrice !== null && currentPrice !== undefined) ? 'var(--cyan)' : 'var(--text-dim)' }}>
+                            {(currentPrice !== null && currentPrice !== undefined) ? fmt(currentPrice) : fmt(signal.entry_price)}
+                            {(currentPrice === null || currentPrice === undefined) && <span style={{ fontSize: 11, color: 'var(--text-dim)', marginLeft: 4 }}>(entry)</span>}
+                        </div>
                     </div>
                 </div>
 
@@ -80,6 +122,29 @@ function SignalDetailsModal({ signal, onClose }) {
                     </div>
                 </div>
 
+                {signal.ai_analysis && (
+                    <div className="card" style={{ padding: 16, background: 'rgba(0,229,255,0.05)', border: '1px solid var(--cyan-dim)', borderRadius: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                            <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--cyan)', display: 'flex', alignItems: 'center', gap: 6, letterSpacing: '0.05em' }}>
+                                <Cpu size={14} /> AI AGENT ANALYSIS
+                            </div>
+                            <div style={{ 
+                                fontSize: 12, 
+                                fontWeight: 900, 
+                                padding: '2px 8px',
+                                borderRadius: 6,
+                                background: signal.ai_score >= 70 ? 'rgba(0,230,118,0.1)' : signal.ai_score >= 50 ? 'rgba(255,235,59,0.1)' : 'rgba(255,23,68,0.1)',
+                                color: signal.ai_score >= 70 ? 'var(--green)' : signal.ai_score >= 50 ? 'var(--yellow)' : 'var(--red)' 
+                            }}>
+                                SCORE: {signal.ai_score}/100
+                            </div>
+                        </div>
+                        <div style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.6, fontStyle: 'italic', borderLeft: '2px solid var(--cyan-dim)', paddingLeft: 12 }}>
+                            "{signal.ai_analysis}"
+                        </div>
+                    </div>
+                )}
+
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <Target size={14} color="var(--green)" />
@@ -105,7 +170,13 @@ function SignalDetailsModal({ signal, onClose }) {
                         <History size={12} />
                         Status: <span style={{ color: 'var(--text-primary)', textTransform: 'uppercase', fontWeight: 700 }}>{signal.status}</span>
                     </div>
-                    <a href={`https://www.tradingview.com/chart/?symbol=BINANCE:${signal.symbol.replace('/', '')}P`} target="_blank" rel="noreferrer" className="btn-ghost" style={{ fontSize: 11, padding: '4px 8px', gap: 6 }}>
+                    <a 
+                        href={`https://www.tradingview.com/chart/?symbol=BINANCE:${signal.symbol.split(':')[0].replace('/', '')}.P`} 
+                        target="_blank" 
+                        rel="noreferrer" 
+                        className="btn-ghost" 
+                        style={{ fontSize: 11, padding: '4px 8px', gap: 6 }}
+                    >
                         View on TradingView <ExternalLink size={12} />
                     </a>
                 </div>
@@ -186,8 +257,9 @@ export default function SignalHistory() {
                             { label: 'WINS', value: data?.wins ?? '—', color: 'var(--green)' },
                             { label: 'LOSSES', value: data?.losses ?? '—', color: 'var(--red)' },
                             { label: 'WIN RATE', value: data?.win_rate != null ? `${data.win_rate}%` : '—', color: data?.win_rate >= 50 ? 'var(--green)' : 'var(--red)' },
+                            { label: 'TOTAL P&L', value: data?.total_pnl != null ? `${data.total_pnl > 0 ? '+' : ''}${data.total_pnl}%` : '—', color: data?.total_pnl >= 0 ? 'var(--green)' : 'var(--red)' },
                         ].map(({ label, value, color }) => (
-                            <div key={label} className="card" style={{ padding: '8px 16px', textAlign: 'center' }}>
+                            <div key={label} className="card" style={{ padding: '8px 16px', textAlign: 'center', minWidth: 80 }}>
                                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 17, fontWeight: 700, color }}>{value}</div>
                                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.08em', marginTop: 2 }}>{label}</div>
                             </div>
@@ -203,6 +275,47 @@ export default function SignalHistory() {
                     </button>
                 </div>
             </div>
+
+            {/* Strategy Analytics */}
+            {data?.strategy_stats?.length > 0 && (
+                <div style={{ flexShrink: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, paddingLeft: 4 }}>
+                        <Zap size={14} color="var(--purple)" />
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', letterSpacing: '0.05em' }}>STRATEGY PERFORMANCE</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 6, scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                        {data.strategy_stats.map(strat => {
+                            const noData = strat.win_rate === 0 && strat.total_pnl === 0 && !strat.has_backtest
+                            const borderColor = noData ? 'var(--border)' : strat.win_rate >= 55 ? 'var(--green)' : strat.win_rate >= 45 ? 'var(--yellow)' : 'var(--red)'
+                            return (
+                                <div key={strat.name} className="card" style={{ padding: '12px 16px', minWidth: 195, display: 'flex', flexDirection: 'column', gap: 6, borderLeft: `3px solid ${borderColor}`, background: 'rgba(255,255,255,0.01)' }}>
+                                    <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 160 }} title={strat.name}>{strat.name}</div>
+                                    {noData ? (
+                                        <div style={{ fontSize: 10, color: 'var(--text-dim)', fontStyle: 'italic', paddingTop: 4 }}>
+                                            ⏳ No backtest data yet.<br />Run Full Backtest to populate stats.
+                                        </div>
+                                    ) : (
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                                            <div>
+                                                <div style={{ fontSize: 9, color: 'var(--text-dim)', marginBottom: 2 }}>WIN RATE</div>
+                                                <div style={{ fontSize: 13, fontWeight: 800, color: strat.win_rate >= 55 ? 'var(--green)' : strat.win_rate >= 45 ? 'var(--yellow)' : 'var(--red)' }}>{strat.win_rate}%</div>
+                                            </div>
+                                            <div>
+                                                <div style={{ fontSize: 9, color: 'var(--text-dim)', marginBottom: 2 }}>TOTAL P&L</div>
+                                                <div style={{ fontSize: 13, fontWeight: 800, color: strat.total_pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>{strat.total_pnl > 0 ? '+' : ''}{strat.total_pnl}%</div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div style={{ fontSize: 9, color: 'var(--text-dim)', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 4 }}>
+                                        {strat.total_signals} Signals ({strat.wins}W / {strat.losses}L)
+                                        {strat.best_coin && <span style={{ marginLeft: 4, color: 'var(--cyan)' }}>· {strat.best_coin} {strat.best_timeframe}</span>}
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                </div>
+            )}
 
             {/* Filters */}
             <div className="card" style={{ padding: '10px 14px', display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0, flexWrap: 'wrap' }}>
@@ -274,8 +387,10 @@ export default function SignalHistory() {
                                     <th>Type</th>
                                     <th>TF</th>
                                     <th>Entry</th>
+                                    <th>Current Price</th>
                                     <th>Stop Loss</th>
                                     <th>Take Profit</th>
+                                    <th>P&L</th>
                                     <th>Confidence</th>
                                     <th>Volatility</th>
                                     <th>Status</th>
@@ -296,9 +411,20 @@ export default function SignalHistory() {
                                         <td style={{ color: 'var(--text-secondary)' }}>{s.strategy}</td>
                                         <td><span className={s.signal_type === 'BUY' ? 'badge badge-buy' : 'badge badge-sell'}>{s.signal_type}</span></td>
                                         <td style={{ color: 'var(--text-dim)' }}>{s.timeframe}</td>
-                                        <td>{fmt(s.entry_price)}</td>
-                                        <td style={{ color: 'var(--red)' }}>{fmt(s.stop_loss)}</td>
-                                        <td style={{ color: 'var(--green)' }}>{fmt(s.take_profit)}</td>
+                                        <td style={{ fontFamily: 'var(--font-mono)' }}>{fmt(s.entry_price)}</td>
+                                        <td style={{ fontFamily: 'var(--font-mono)', color: s.current_price ? 'var(--cyan)' : 'var(--text-dim)' }}>
+                                            {s.current_price ? fmt(s.current_price) : '—'}
+                                        </td>
+                                        <td style={{ color: 'var(--red)', fontFamily: 'var(--font-mono)' }}>{fmt(s.stop_loss)}</td>
+                                        <td style={{ color: 'var(--green)', fontFamily: 'var(--font-mono)' }}>{fmt(s.take_profit)}</td>
+                                        <td>
+                                            {s.pnl_percent != null ? (
+                                                <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontWeight: 700, color: s.pnl_percent >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)' }}>
+                                                    {s.pnl_percent >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+                                                    {s.pnl_percent > 0 ? '+' : ''}{s.pnl_percent.toFixed(2)}%
+                                                </span>
+                                            ) : <span style={{ color: 'var(--text-dim)' }}>—</span>}
+                                        </td>
                                         <td>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                                 <span style={{ color: Number(s.confidence) >= 70 ? 'var(--green)' : 'var(--yellow)', fontWeight: 700 }}>
@@ -315,15 +441,11 @@ export default function SignalHistory() {
                                         </td>
                                         <td>
                                             <span className="badge badge-active" style={
-                                                s.status === 'closed' || (s.pnl_percent > 0) ? { background: 'rgba(0,230,118,0.12)', color: 'var(--green)', borderColor: 'rgba(0,230,118,0.3)' } :
-                                                    (s.status === 'stopped' || s.pnl_percent < 0) ? { background: 'rgba(255,23,68,0.12)', color: 'var(--red)', borderColor: 'rgba(255,23,68,0.3)' } : {}
+                                                s.status === 'active' ? {} :
+                                                ['closed', 'won'].includes(s.status) ? { background: 'rgba(0,230,118,0.12)', color: 'var(--green)', borderColor: 'rgba(0,230,118,0.3)' } :
+                                                { background: 'rgba(255,23,68,0.12)', color: 'var(--red)', borderColor: 'rgba(255,23,68,0.3)' }
                                             }>
-                                                {s.pnl_percent != null ? (
-                                                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                                        {s.pnl_percent > 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-                                                        {s.pnl_percent > 0 ? '+' : ''}{s.pnl_percent.toFixed(2)}%
-                                                    </span>
-                                                ) : s.status}
+                                                {s.status}
                                             </span>
                                         </td>
                                         <td style={{ color: 'var(--text-dim)' }}>{timeStr(s.created_at)}</td>

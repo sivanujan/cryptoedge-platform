@@ -12,16 +12,22 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# NVIDIA AI configuration
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+DEFAULT_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.3-70b-instruct")
+
+# OpenRouter fallback configuration
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_URL     = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL      = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-haiku")
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemma-4-31b-it:free")
 
 # Fallback models prioritized if the default fails or is exhausted
 MODEL_FALLBACKS = [
     DEFAULT_MODEL,
-    "anthropic/claude-3.5-haiku",       # Very fast, smart
-    "google/gemini-2.0-flash-exp:free", # Excellent free backup
-    "meta-llama/llama-3.3-70b-instruct"  # Powerful backup
+    "google/gemma-4-31b-it:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "qwen/qwen3-coder:free"
 ]
 # Ensure no duplicates while preserving order
 MODEL_FALLBACKS = list(dict.fromkeys(MODEL_FALLBACKS))
@@ -102,13 +108,13 @@ Output only the Python class code (no markdown text before or after):"""
 
 def convert_pine_to_python(pine_script: str, strategy_name: str = "") -> str:
     """
-    Call OpenRouter API to convert Pine Script to Python.
+    Call NVIDIA AI (primary) or OpenRouter (fallback) to convert Pine Script to Python.
     """
-    if not OPENROUTER_API_KEY:
-        raise RuntimeError("OpenRouter API key is missing. Set OPENROUTER_API_KEY in .env")
+    if not NVIDIA_API_KEY and not OPENROUTER_API_KEY:
+        raise RuntimeError("AI API key is missing. Set NVIDIA_API_KEY or OPENROUTER_API_KEY in .env")
 
     user_msg = _USER_TEMPLATE.format(pine_script=pine_script.strip())
-
+    
     payload = {
         "messages": [
             {"role": "system", "content": _SYSTEM_PROMPT},
@@ -117,48 +123,58 @@ def convert_pine_to_python(pine_script: str, strategy_name: str = "") -> str:
         "temperature": 0.1,
     }
 
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "HTTP-Referer": "http://localhost:5174",
-        "X-Title": "CryptoEdge Pine Converter",
-    }
-
-    import time
-    last_error = None
-
-    for model in MODEL_FALLBACKS:
-        payload["model"] = model
-        logger.info(f"Trying OpenRouter model: {model}...")
-        try:
-            resp = requests.post(OPENROUTER_URL, json=payload, headers=headers, timeout=120)
-            
-            if resp.status_code == 401:
-                last_error = "OpenRouter 401 Unauthorized - Please check if your API key is valid and has not expired."
-                logger.error(last_error)
-                raise RuntimeError(last_error)
-            
-            if resp.status_code == 402:
-                last_error = "OpenRouter 402 Payment Required - Your account may have insufficient credits."
-                logger.error(last_error)
-                raise RuntimeError(last_error)
-
-            if resp.status_code in (429, 400, 404):
-                last_error = f"Model {model} returned {resp.status_code}: {resp.text[:200]}"
-                logger.warning(f"{last_error} — trying next fallback...")
-                time.sleep(2)
+    # Try OpenRouter FIRST (User requested for timeout troubleshooting)
+    if OPENROUTER_API_KEY:
+        fallback_models = [OPENROUTER_MODEL, "meta-llama/llama-3.3-70b-instruct:free", "google/gemma-4-31b-it:free"]
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "HTTP-Referer": "http://localhost:5174",
+            "X-Title": "CryptoEdge Pine Converter",
+        }
+        
+        last_error = None
+        for model in fallback_models:
+            payload["model"] = model
+            logger.info(f"Trying OpenRouter model: {model}...")
+            try:
+                resp = requests.post(OPENROUTER_URL, json=payload, headers=headers, timeout=180)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    code = data["choices"][0]["message"]["content"]
+                    logger.info(f"Successfully converted with OpenRouter model: {model}")
+                    return _strip_code_fences(code).strip()
+                else:
+                    last_error = f"OR Status {resp.status_code}: {resp.text}"
+                    logger.error(f"OpenRouter model {model} failed: {last_error}")
+            except Exception as e:
+                last_error = str(e)
+                logger.exception(f"OpenRouter exception for model {model}: {e}")
                 continue
+
+    # Fallback to NVIDIA
+    if NVIDIA_API_KEY:
+        try:
+            payload["model"] = DEFAULT_MODEL
+            headers = {
+                "Authorization": f"Bearer {NVIDIA_API_KEY}",
+                "Accept": "application/json",
+            }
+            logger.info(f"Trying NVIDIA fallback model: {DEFAULT_MODEL}...")
+            resp = requests.post(NVIDIA_URL, json=payload, headers=headers, timeout=180)
             
-            resp.raise_for_status()
-            logger.info(f"Successfully got response from {model}")
-            data = resp.json()
-            code = data["choices"][0]["message"]["content"]
-            break  # success
-        except requests.RequestException as e:
-            last_error = f"Request to {model} failed: {str(e)}"
-            logger.warning(f"{last_error} — trying next fallback...")
-            continue
-    else:
-        raise RuntimeError(f"All models exhausted. Last error: {last_error}")
+            if resp.status_code == 200:
+                data = resp.json()
+                code = data["choices"][0]["message"]["content"]
+                logger.info("Successfully converted with NVIDIA AI")
+                return _strip_code_fences(code).strip()
+            else:
+                last_error = f"NVIDIA Status {resp.status_code}: {resp.text}"
+                logger.warning(f"NVIDIA API error: {last_error}")
+        except Exception as e:
+            last_error = str(e)
+            logger.error(f"NVIDIA conversion failed: {e}")
+
+    raise RuntimeError(f"All AI providers failed. Last error: {last_error if (OPENROUTER_API_KEY or NVIDIA_API_KEY) else 'No keys'}")
 
     # Strip any markdown code fences the model may have added
     code = _strip_code_fences(code)
@@ -189,3 +205,78 @@ def validate_strategy_code(code: str) -> tuple[bool, str]:
         return False, "Generated code is missing _STRATEGY_CLASS marker at the end"
 
     return True, ""
+
+
+_SIGNAL_ANALYSIS_PROMPT = """You are a senior crypto market analyst.
+Analyze the following trading signal and provide a concise professional evaluation.
+
+Signal Details:
+- Coin: {symbol}
+- Type: {signal_type}
+- Entry Price: {price}
+- Stop Loss: {sl}
+- Take Profit: {tp}
+- Strategy: {strategy}
+- Recent Metrics: {metrics}
+
+Your task:
+1. Evaluate the quality of this signal based on the price action and strategy.
+2. Provide a 'Sentiment Score' from 0 to 100 (Higher is more confident).
+3. Provide a 2-3 sentence analysis of why this signal is strong or weak.
+
+Output format (JSON):
+{{
+  "score": 85,
+  "analysis": "The breakout above the EMA 200 on high volume confirms a strong bullish trend. With RSI at 60, there is still room for upside before overbought conditions."
+}}
+"""
+
+def analyze_signal_with_ai(signal_data: dict) -> dict:
+    """
+    Evaluate a live signal using AI to provide a score and reasoning.
+    """
+    if not NVIDIA_API_KEY and not OPENROUTER_API_KEY:
+        return {"score": 50, "analysis": "AI analysis unavailable (missing API keys)."}
+
+    prompt = _SIGNAL_ANALYSIS_PROMPT.format(
+        symbol=signal_data.get("symbol"),
+        signal_type=signal_data.get("signal_type"),
+        price=signal_data.get("price"),
+        sl=signal_data.get("sl"),
+        tp=signal_data.get("tp"),
+        strategy=signal_data.get("strategy"),
+        metrics=signal_data.get("metrics")
+    )
+
+    payload = {
+        "messages": [
+            {"role": "system", "content": "You are a professional crypto trading analyst. Respond only in JSON format."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.2,
+        "response_format": {"type": "json_object"}
+    }
+
+    try:
+        # Use OpenRouter for analysis as it handles JSON better across multiple models
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY if OPENROUTER_API_KEY else NVIDIA_API_KEY}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:5174",
+        }
+        url = OPENROUTER_URL if OPENROUTER_API_KEY else NVIDIA_URL
+        model = OPENROUTER_MODEL if OPENROUTER_API_KEY else DEFAULT_MODEL
+        
+        payload["model"] = model
+        
+        resp = requests.post(url, json=payload, headers=headers, timeout=30)
+        if resp.status_code == 200:
+            import json
+            content = resp.json()["choices"][0]["message"]["content"]
+            # Clean potential markdown fences
+            content = _strip_code_fences(content)
+            return json.loads(content)
+    except Exception as e:
+        logger.error(f"AI Signal Analysis failed: {e}")
+    
+    return {"score": 50, "analysis": "AI could not complete analysis at this time."}

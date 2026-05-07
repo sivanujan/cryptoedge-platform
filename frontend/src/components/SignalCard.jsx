@@ -1,4 +1,4 @@
-import { ArrowUpRight, ArrowDownRight, Shield, Target, TrendingUp } from 'lucide-react'
+import { ArrowUpRight, ArrowDownRight, Shield, Target, TrendingUp, Cpu } from 'lucide-react'
 
 export default function SignalCard({ signal }) {
     const {
@@ -86,21 +86,22 @@ export default function SignalCard({ signal }) {
                 ))}
             </div>
 
-            {/* Confidence bar */}
-            <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.06em' }}>CONFIDENCE</span>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: mainColor, fontWeight: 700 }}>{confidence}%</span>
+            {/* AI Score (Small badge) */}
+            {(signal.ai_score !== undefined && signal.ai_score !== null) && (
+                <div style={{ 
+                    display: 'flex', alignItems: 'center', gap: 6, 
+                    padding: '4px 8px', background: 'rgba(0,229,255,0.05)', 
+                    borderRadius: 6, border: '1px solid rgba(0,229,255,0.1)'
+                }}>
+                    <Cpu size={12} color="var(--cyan)" />
+                    <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--cyan)', letterSpacing: '0.04em' }}>
+                        AI AGENT: {signal.ai_score}/100
+                    </span>
+                    <span style={{ fontSize: 9, color: 'var(--text-dim)', fontStyle: 'italic', marginLeft: 'auto' }}>
+                        {signal.ai_score >= 70 ? 'Strong' : signal.ai_score >= 50 ? 'Neutral' : 'Weak'}
+                    </span>
                 </div>
-                <div style={{ height: 3, background: 'var(--border)', borderRadius: 2 }}>
-                    <div style={{
-                        height: '100%', width: `${confidence}%`,
-                        background: `linear-gradient(90deg, ${mainColor}88, ${mainColor})`,
-                        borderRadius: 2,
-                        transition: 'width 0.5s ease',
-                    }} />
-                </div>
-            </div>
+            )}
         </div>
     )
 }

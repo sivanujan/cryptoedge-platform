@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react'
+import { useQueryClient, useQuery } from '@tanstack/react-query'
 import { Activity, Play, RefreshCw, BarChart2, Cpu, CheckCircle, AlertCircle, Trash2 } from 'lucide-react'
 import { API } from '../lib/api'
 
-export default function StrategyCard({ strategy, onClick, onRunBacktest, onRefresh }) {
+    export default function StrategyCard({ strategy, onClick, onViewTable, onRunBacktest, onDelete }) {
     const [running, setRunning] = useState(false)
     const [done, setDone] = useState(false)
     const [converting, setConverting] = useState(false)
     const [convertDone, setConvertDone] = useState(false)
     const [convertError, setConvertError] = useState(null)
-    const [summary, setSummary] = useState(null)
     const [deleting, setDeleting] = useState(false)
 
     const {
@@ -22,15 +22,12 @@ export default function StrategyCard({ strategy, onClick, onRunBacktest, onRefre
         has_python_code = false,
     } = strategy || {}
 
-    useEffect(() => {
-        if (!String(id).startsWith('local_')) {
-            API.getBacktestSummary?.(id).then(res => {
-                if (res && res.total_coins_tested > 0) {
-                    setSummary(res)
-                }
-            }).catch(e => console.error("Summary fetch error", e))
-        }
-    }, [id])
+    const { data: summary } = useQuery({
+        queryKey: ['backtestSummary', id],
+        queryFn: () => API.getBacktestSummary(id),
+        enabled: !!id && !String(id).startsWith('local_'),
+        staleTime: 30000,
+    })
 
     const wr = summary ? summary.best_win_rate : (Number(avg_win_rate) || 0)
     let wrColor = 'var(--text-dim)'
@@ -51,14 +48,14 @@ export default function StrategyCard({ strategy, onClick, onRunBacktest, onRefre
         setRunning(true)
         try {
             if (onRunBacktest) {
-                // Fire and don't await — the progress modal in StrategyLibrary takes over
                 onRunBacktest(id)
             }
         } finally {
-            // Reset the button quickly; the modal handles tracking from here
             setTimeout(() => setRunning(false), 800)
         }
     }
+
+    const qc = useQueryClient()
 
     const handleConvertClick = async (e) => {
         e.stopPropagation()
@@ -68,26 +65,12 @@ export default function StrategyCard({ strategy, onClick, onRunBacktest, onRefre
         try {
             await API.convertPineScript(id)
             setConvertDone(true)
-            if (onRefresh) onRefresh()
+            qc.invalidateQueries(['strategies']) // Refresh the list to show "has_python_code"
         } catch (err) {
-            const msg = err.response?.data?.detail || 'Conversion failed'
+            const msg = err.response?.data?.error || err.response?.data?.detail || err.message || 'Conversion failed'
             setConvertError(msg)
         } finally {
             setConverting(false)
-        }
-    }
-
-    const handleDeleteClick = async (e) => {
-        e.stopPropagation()
-        if (window.confirm(`Are you sure you want to delete "${name}"?`)) {
-            setDeleting(true)
-            try {
-                await API.deleteStrategy(id)
-                if (onRefresh) onRefresh()
-            } catch (err) {
-                console.error("Delete failed", err)
-                setDeleting(false)
-            }
         }
     }
 
@@ -125,23 +108,24 @@ export default function StrategyCard({ strategy, onClick, onRunBacktest, onRefre
                     <div>
                         <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 16, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
                             {name}
-                            {!String(id).startsWith('local_') && (
-                                <button
-                                    onClick={handleDeleteClick}
-                                    disabled={deleting}
-                                    style={{
-                                        background: 'transparent', border: 'none', color: 'var(--text-dim)', 
-                                        cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', 
-                                        justifyContent: 'center', borderRadius: 4, opacity: 0.6,
-                                        transition: 'all 0.2s'
-                                    }}
-                                    onMouseEnter={e => { e.currentTarget.style.color = 'var(--red)'; e.currentTarget.style.opacity = 1; e.currentTarget.style.background = 'rgba(239,68,68,0.1)' }}
-                                    onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-dim)'; e.currentTarget.style.opacity = 0.6; e.currentTarget.style.background = 'transparent' }}
-                                    title="Delete Strategy"
-                                >
-                                    {deleting ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                                </button>
-                            )}
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (onDelete) onDelete(id);
+                                }}
+                                disabled={deleting}
+                                style={{
+                                    background: 'transparent', border: 'none', color: 'var(--text-dim)', 
+                                    cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', 
+                                    justifyContent: 'center', borderRadius: 4, opacity: 0.6,
+                                    transition: 'all 0.2s'
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.color = 'var(--red)'; e.currentTarget.style.opacity = 1; e.currentTarget.style.background = 'rgba(239,68,68,0.1)' }}
+                                onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-dim)'; e.currentTarget.style.opacity = 0.6; e.currentTarget.style.background = 'transparent' }}
+                                title="Delete Strategy"
+                            >
+                                {deleting ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -205,7 +189,7 @@ export default function StrategyCard({ strategy, onClick, onRunBacktest, onRefre
                                 padding: '2px 4px', borderRadius: 4,
                                 border: isBest ? '1px solid var(--cyan-dim)' : '1px solid transparent'
                             }}>
-                                {tfWr ? `${tfWr.toFixed(0)}%` : '—'}
+                                { (tfWr !== undefined && tfWr !== null) ? `${tfWr.toFixed(0)}%` : '—'}
                             </div>
                         </div>
                     )
@@ -270,7 +254,11 @@ export default function StrategyCard({ strategy, onClick, onRunBacktest, onRefre
                 </button>
 
                 <button
-                    onClick={onClick}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (onViewTable) onViewTable();
+                        else if (onClick) onClick();
+                    }}
                     className="btn-ghost"
                     style={{ padding: '6px 14px', fontSize: 12, minHeight: 32, gap: 6, flex: 1, display: 'flex', justifyContent: 'center', whiteSpace: 'nowrap' }}
                 >

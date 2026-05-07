@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+{% block subtitle %}Real-time market overview and signal status{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+    <div class="cyber-card p-6">
+        <div class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-2">TOTAL COINS</div>
+        <div class="text-3xl font-bold font-mono">{{ stats.total_coins }}</div>
+        <div class="mt-2 text-xs text-slate-500">Active market pairs</div>
+    </div>
+    <div class="cyber-card p-6">
+        <div class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-2">ACTIVE SIGNALS</div>
+        <div class="text-3xl font-bold font-mono text-cyan-400">{{ stats.active_signals }}</div>
+        <div class="mt-2 text-xs text-slate-500">Current open signals</div>
+    </div>
+    <div class="cyber-card p-6">
+        <div class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-2">TODAY WIN RATE</div>
+        <div class="text-3xl font-bold font-mono text-green-400">{{ stats.win_rate }}%</div>
+        <div class="mt-2 text-xs text-slate-500">Based on closed signals</div>
+    </div>
+    <div class="cyber-card p-6">
+        <div class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-2">BOT STATUS</div>
+        <div class="text-3xl font-bold font-mono text-purple-400 capsule">{{ stats.bot_status.upper() }}</div>
+        <div class="mt-2 text-xs text-slate-500 line-clamp-1">Scanning markets...</div>
+    </div>
+</div>
+
+<div class="flex flex-col gap-6">
+    <div class="flex justify-between items-center">
+        <h3 class="text-xl font-bold">Recent Signals</h3>
+        <a href="/signals" class="text-cyan-400 text-sm hover:underline">View All History →</a>
+    </div>
+
+    <div class="cyber-card overflow-hidden">
+        <table class="w-full text-left border-collapse">
+            <thead>
+                <tr class="bg-white/5 border-b border-white/10">
+                    <th class="p-4 text-[10px] text-slate-500 uppercase font-bold tracking-widest">COIN</th>
+                    <th class="p-4 text-[10px] text-slate-500 uppercase font-bold tracking-widest">TYPE</th>
+                    <th class="p-4 text-[10px] text-slate-500 uppercase font-bold tracking-widest">ENTRY PRICE</th>
+                    <th class="p-4 text-[10px] text-slate-500 uppercase font-bold tracking-widest">TP / SL</th>
+                    <th class="p-4 text-[10px] text-slate-500 uppercase font-bold tracking-widest">CONFIDENCE</th>
+                    <th class="p-4 text-[10px] text-slate-500 uppercase font-bold tracking-widest">TIME</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for signal in signals %}
+                <tr class="border-b border-white/5 hover:bg-white/[0.02] transition-colors cursor-pointer">
+                    <td class="p-4">
+                        <div class="font-bold text-cyan-400">{{ signal.coin.symbol.split(':')[0] }}</div>
+                        <div class="text-[10px] text-slate-500 font-mono">{{ signal.timeframe }}</div>
+                    </td>
+                    <td class="p-4">
+                        <span class="px-2 py-1 rounded text-[10px] font-bold {% if signal.signal_type == 'BUY' %}bg-green-500/10 text-green-400{% else %}bg-red-500/10 text-red-400{% endif %}">
+                            {{ signal.signal_type }}
+                        </span>
+                    </td>
+                    <td class="p-4 font-mono text-sm">${{ "{:,.2f}".format(signal.entry_price) }}</td>
+                    <td class="p-4">
+                        <div class="text-xs text-green-400 font-mono">TP: ${{ "{:,.2f}".format(signal.take_profit) }}</div>
+                        <div class="text-xs text-red-400 font-mono">SL: ${{ "{:,.2f}".format(signal.stop_loss) }}</div>
+                    </td>
+                    <td class="p-4">
+                        <div class="w-full bg-slate-800 h-1 rounded-full overflow-hidden">
+                            <div class="h-full bg-cyan-400" style="width: {{ signal.confidence }}%"></div>
+                        </div>
+                        <div class="text-[10px] text-slate-400 mt-1 font-mono">{{ signal.confidence }}%</div>
+                    </td>
+                    <td class="p-4 text-slate-500 text-xs font-mono">
+                        {{ signal.created_at.strftime('%H:%M:%S') }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

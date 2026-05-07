@@ -93,6 +93,8 @@ class Signal(Base):
     volatility = Column(Float, nullable=True)
     timeframe = Column(String(10), nullable=False, default="1h")
     status = Column(String(20), default="active")  # active, closed, cancelled
+    ai_analysis = Column(Text, nullable=True) # AI analysis details
+    ai_score = Column(Float, nullable=True) # AI sentiment score (0-100)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     coin = relationship("Coin", back_populates="signals")

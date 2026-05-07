@@ -8,11 +8,11 @@ export default function TopBar({ btcPrice }) {
     const [priceDir, setPriceDir] = useState(null) // 'up' | 'down'
 
     useEffect(() => {
-        if (btcPrice && prevPrice) {
-            setPriceDir(btcPrice > prevPrice ? 'up' : btcPrice < prevPrice ? 'down' : null)
+        if (btcPrice?.last && prevPrice) {
+            setPriceDir(btcPrice.last > prevPrice ? 'up' : btcPrice.last < prevPrice ? 'down' : null)
         }
-        setPrevPrice(btcPrice)
-    }, [btcPrice]) // eslint-disable-line
+        setPrevPrice(btcPrice?.last)
+    }, [btcPrice?.last]) // eslint-disable-line
 
     const fmtPrice = (p) =>
         p ? `$${Number(p).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'
@@ -38,39 +38,64 @@ export default function TopBar({ btcPrice }) {
             zIndex: 10,
         }}>
             {/* Left: page title */}
-            <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 14, color: 'var(--text-secondary)' }}>
-                Live Market Terminal
+            <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 13, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--cyan)' }} />
+                LIVE MARKET TERMINAL
             </div>
 
-            {/* Center: BTC live price */}
+            {/* Center: BTC live price with Change % */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{
-                    background: 'rgba(0,229,255,0.06)',
-                    border: '1px solid rgba(0,229,255,0.15)',
-                    borderRadius: 8,
-                    padding: '4px 16px',
-                    display: 'flex', alignItems: 'center', gap: 8,
-                }}>
-                    <img
-                        src="https://assets.coingecko.com/coins/images/1/thumb/bitcoin.png"
-                        alt="BTC"
-                        width={16} height={16}
-                        style={{ borderRadius: '50%' }}
-                        onError={e => { e.target.style.display = 'none' }}
-                    />
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.05em' }}>BTC/USDT</span>
-                    <span
-                        key={btcPrice}
-                        style={{
-                            fontFamily: 'var(--font-mono)', fontSize: 15, fontWeight: 700,
-                            color: priceDir === 'up' ? 'var(--green)' : priceDir === 'down' ? 'var(--red)' : 'var(--cyan)',
-                            letterSpacing: '-0.01em',
-                            animation: btcPrice ? 'number-tick 0.3s ease' : 'none',
-                            transition: 'color 0.5s',
-                        }}
-                    >
-                        {fmtPrice(btcPrice)}
-                    </span>
+                <div 
+                    className={priceDir === 'up' ? 'flash-up' : priceDir === 'down' ? 'flash-down' : ''}
+                    style={{
+                        background: 'rgba(0,0,0,0.2)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 10,
+                        padding: '4px 12px',
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        transition: 'all 0.3s ease'
+                    }}
+                >
+                    <div style={{ position: 'relative' }}>
+                        <img
+                            src="https://assets.coingecko.com/coins/images/1/thumb/bitcoin.png"
+                            alt="BTC"
+                            width={18} height={18}
+                            style={{ borderRadius: '50%', filter: 'drop-shadow(0 0 4px rgba(247, 147, 26, 0.4))' }}
+                            onError={e => { e.target.style.display = 'none' }}
+                        />
+                    </div>
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1 }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.05em', fontWeight: 700 }}>BTC/USDT</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                            <span
+                                key={btcPrice?.last}
+                                style={{
+                                    fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 800,
+                                    color: priceDir === 'up' ? 'var(--green)' : priceDir === 'down' ? 'var(--red)' : 'var(--text-primary)',
+                                    letterSpacing: '-0.01em',
+                                    transition: 'color 0.4s',
+                                }}
+                            >
+                                {fmtPrice(btcPrice?.last)}
+                            </span>
+                            
+                            {btcPrice?.percentage !== undefined && (
+                                <span style={{
+                                    fontSize: 11,
+                                    fontWeight: 900,
+                                    color: btcPrice.percentage >= 0 ? 'var(--green)' : 'var(--red)',
+                                    background: btcPrice.percentage >= 0 ? 'rgba(0, 230, 118, 0.1)' : 'rgba(255, 23, 68, 0.1)',
+                                    padding: '1px 6px',
+                                    borderRadius: 4,
+                                    letterSpacing: '0.02em'
+                                }}>
+                                    {btcPrice.percentage >= 0 ? '+' : ''}{btcPrice.percentage.toFixed(2)}%
+                                </span>
+                            )}
+                        </div>
+                    </div>
                 </div>
             </div>
 

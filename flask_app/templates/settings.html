@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}Settings{% endblock %}
+{% block subtitle %}Platform configuration and risk management{% endblock %}
+
+{% block content %}
+<div class="flex flex-col gap-6 max-w-4xl">
+    <div class="cyber-card p-6">
+        <h3 class="text-cyan-400 font-mono text-xs uppercase tracking-widest mb-6">SCANNER CONFIGURATION</h3>
+        
+        <div class="flex items-center justify-between py-4 border-b border-white/5">
+            <div>
+                <div class="font-bold text-sm">Scan Interval</div>
+                <div class="text-[10px] text-slate-500 font-mono">How often to check for signals</div>
+            </div>
+            <select class="bg-slate-900 border border-white/10 rounded px-3 py-1 text-sm font-mono focus:outline-none focus:border-cyan-400">
+                <option value="5">5 minutes</option>
+                <option value="15" selected>15 minutes</option>
+                <option value="60">1 hour</option>
+            </select>
+        </div>
+
+        <div class="flex items-center justify-between py-4">
+            <div>
+                <div class="font-bold text-sm">Sync Coin List</div>
+                <div class="text-[10px] text-slate-500 font-mono">Fetch all USDT pairs from Binance</div>
+            </div>
+            <button class="px-4 py-2 rounded bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 transition-colors">
+                Sync Now
+            </button>
+        </div>
+    </div>
+
+    <div class="cyber-card p-6">
+        <h3 class="text-cyan-400 font-mono text-xs uppercase tracking-widest mb-6">RISK MANAGEMENT</h3>
+        
+        <div class="flex items-center justify-between py-4 border-b border-white/5">
+            <div>
+                <div class="font-bold text-sm">Default Stop Loss</div>
+                <div class="text-[10px] text-slate-500 font-mono">Stop loss % from entry price</div>
+            </div>
+            <div class="flex items-center gap-2">
+                <input type="number" value="2.0" step="0.1" class="w-20 bg-slate-900 border border-white/10 rounded px-3 py-1 text-sm font-mono text-right focus:outline-none focus:border-cyan-400">
+                <span class="text-xs text-slate-500">%</span>
+            </div>
+        </div>
+
+        <div class="flex items-center justify-between py-4">
+            <div>
+                <div class="font-bold text-sm">Default Take Profit</div>
+                <div class="text-[10px] text-slate-500 font-mono">Take profit % from entry price</div>
+            </div>
+            <div class="flex items-center gap-2">
+                <input type="number" value="4.0" step="0.1" class="w-20 bg-slate-900 border border-white/10 rounded px-3 py-1 text-sm font-mono text-right focus:outline-none focus:border-cyan-400">
+                <span class="text-xs text-slate-500">%</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="flex justify-end mt-4">
+        <button id="save-settings" class="px-6 py-3 rounded bg-cyan-500 text-black font-bold text-sm hover:bg-cyan-400 transition-colors shadow-[0_0_20px_rgba(0,229,255,0.3)]">
+            Save All Changes
+        </button>
+    </div>
+</div>
+
+<script>
+    document.getElementById('save-settings').addEventListener('click', async () => {
+        const settings = {
+            scanner_interval_minutes: document.querySelector('select').value,
+            default_sl_pct: document.querySelector('input[type="number"][value="2.0"]').value,
+            default_tp_pct: document.querySelector('input[type="number"][value="4.0"]').value
+        };
+        
+        try {
+            const resp = await fetch('/api/v1/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(settings)
+            });
+            if (resp.ok) alert('Settings saved successfully!');
+            else alert('Failed to save settings.');
+        } catch (err) {
+            console.error(err);
+            alert('An error occurred.');
+        }
+    });
+
+    document.querySelector('button:contains("Sync Now")').addEventListener('click', async () => {
+        const btn = event.target;
+        btn.disabled = true;
+        btn.innerText = 'Syncing...';
+        
+        try {
+            const resp = await fetch('/api/v1/coins/sync', { method: 'POST' });
+            const data = await resp.json();
+            alert(`Synced! Added ${data.added} new coins.`);
+        } catch (err) {
+            console.error(err);
+            alert('Sync failed.');
+        } finally {
+            btn.disabled = false;
+            btn.innerText = 'Sync Now';
+        }
+    });
+
+    // Helper for :contains selector in JS
+    window.addEventListener('DOMContentLoaded', () => {
+        const syncBtn = Array.from(document.querySelectorAll('button')).find(el => el.textContent.includes('Sync Now'));
+        if (syncBtn) {
+            syncBtn.addEventListener('click', async () => {
+                syncBtn.disabled = true;
+                syncBtn.innerText = 'Syncing...';
+                try {
+                    const resp = await fetch('/api/v1/coins/sync', { method: 'POST' });
+                    const data = await resp.json();
+                    alert(`Synced! Added ${data.added} new coins.`);
+                } catch (err) { alert('Sync failed.'); }
+                finally { syncBtn.disabled = false; syncBtn.innerText = 'Sync Now'; }
+            });
+        }
+    });
+</script>
+{% endblock %}

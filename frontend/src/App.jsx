@@ -12,10 +12,14 @@ import BacktestResults from './pages/BacktestResults'
 import StrategyLibrary from './pages/StrategyLibrary'
 import Screener from './pages/Screener'
 import SignalHistory from './pages/SignalHistory'
+import DeepAnalysis from './pages/DeepAnalysis'
+import FuturesAnalysis from './pages/FuturesAnalysis'
 import Settings from './pages/Settings'
 
 import { useQuery } from '@tanstack/react-query'
 import { API } from './lib/api'
+
+import { useLocation } from 'react-router-dom'
 
 function AppShell() {
   const { prices } = usePriceSocket()
@@ -39,7 +43,6 @@ function AppShell() {
     <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', background: 'var(--bg-primary)' }}>
       <Sidebar stats={sidebarStats} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
-        {/* TopBar manages its own health check + BTC price from WS */}
         <TopBar btcPrice={btcPrice} />
         <main className="grid-overlay" style={{ flex: 1, overflow: 'auto', padding: 16, background: 'var(--bg-primary)' }}>
           <Routes>
@@ -48,6 +51,9 @@ function AppShell() {
             <Route path="/strategies" element={<StrategyLibrary />} />
             <Route path="/screener" element={<Screener />} />
             <Route path="/signals" element={<SignalHistory />} />
+            <Route path="/analysis" element={<DeepAnalysis />} />
+            <Route path="/deep-analysis" element={<DeepAnalysis />} />
+            <Route path="/futures" element={<FuturesAnalysis />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </main>

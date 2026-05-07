@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
     LayoutDashboard, FlaskConical, BookOpen,
-    History, Settings, Activity, Zap, TrendingUp, Filter
+    History, Settings, Activity, Zap, TrendingUp, TrendingDown, Filter
 } from 'lucide-react'
 
 const NAV = [
@@ -10,6 +10,8 @@ const NAV = [
     { to: '/strategies', icon: BookOpen, label: 'Strategies' },
     { to: '/screener', icon: Filter, label: 'Screener' },
     { to: '/signals', icon: History, label: 'Signals' },
+    { to: '/deep-analysis', icon: Zap, label: 'Deep Analysis' },
+    { to: '/futures', icon: Activity, label: 'Futures' },
     { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 
@@ -58,19 +60,36 @@ export default function Sidebar({ stats }) {
                 {NAV.map(({ to, icon: Icon, label }) => (
                     <NavLink key={to} to={to} end={to === '/'} style={{ textDecoration: 'none' }}>
                         {({ isActive }) => (
-                            <div className={isActive ? 'nav-active' : ''} style={{
-                                display: 'flex', alignItems: 'center', gap: 12,
-                                padding: '10px 20px', cursor: 'pointer',
-                                color: isActive ? 'var(--cyan)' : 'var(--text-secondary)',
-                                fontSize: 13, fontWeight: 500,
-                                transition: 'all 0.15s',
-                                borderRight: isActive ? '2px solid var(--cyan)' : '2px solid transparent',
-                            }}
+                            <div 
+                                className={isActive ? 'nav-active' : ''} 
+                                title={label} // Browser tooltip fallback
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: 12,
+                                    padding: '10px 20px', cursor: 'pointer',
+                                    color: isActive ? 'var(--cyan)' : 'var(--text-secondary)',
+                                    fontSize: 13, fontWeight: isActive ? 700 : 500,
+                                    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    position: 'relative',
+                                    background: isActive ? 'rgba(0, 229, 255, 0.08)' : 'transparent',
+                                    margin: '2px 12px',
+                                    borderRadius: 8,
+                                }}
                                 onMouseEnter={e => { if (!isActive) e.currentTarget.style.color = 'var(--text-primary)' }}
                                 onMouseLeave={e => { if (!isActive) e.currentTarget.style.color = 'var(--text-secondary)' }}
                             >
+                                {isActive && (
+                                    <div style={{
+                                        position: 'absolute',
+                                        left: -12,
+                                        width: 3,
+                                        height: 18,
+                                        background: 'var(--cyan)',
+                                        borderRadius: '0 4px 4px 0',
+                                        boxShadow: '0 0 10px var(--cyan)'
+                                    }} />
+                                )}
                                 <Icon size={16} strokeWidth={isActive ? 2.5 : 1.5} />
-                                {label}
+                                <span style={{ transition: 'opacity 0.2s', opacity: 0.9 }}>{label}</span>
                             </div>
                         )}
                     </NavLink>
@@ -103,10 +122,10 @@ export default function Sidebar({ stats }) {
                 {/* Quick stats */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {[
-                        { label: 'COINS ACTIVE', value: totalCoins.toLocaleString(), icon: Activity },
-                        { label: 'LIVE SIGNALS', value: activeSignals, icon: Zap },
-                        { label: 'TODAY W/R', value: `${todayWinRate}%`, icon: TrendingUp },
-                    ].map(({ label, value, icon: Icon }) => (
+                        { label: 'COINS ACTIVE', value: totalCoins.toLocaleString(), color: 'var(--cyan)', icon: Activity },
+                        { label: 'LIVE SIGNALS', value: activeSignals, color: activeSignals > 0 ? 'var(--green)' : 'var(--text-dim)', icon: Zap },
+                        { label: 'TODAY W/R', value: `${todayWinRate}%`, color: todayWinRate >= 50 ? 'var(--green)' : 'var(--red)', icon: TrendingUp },
+                    ].map(({ label, value, color, icon: Icon }) => (
                         <div key={label} style={{
                             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                         }}>
@@ -114,7 +133,12 @@ export default function Sidebar({ stats }) {
                                 <Icon size={11} color="var(--text-dim)" />
                                 <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em' }}>{label}</span>
                             </div>
-                            <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--cyan)' }}>{value}</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700, color }}>{value}</span>
+                                {label === 'TODAY W/R' && (
+                                    todayWinRate >= 50 ? <TrendingUp size={10} color="var(--green)" /> : <TrendingDown size={10} color="var(--red)" />
+                                )}
+                            </div>
                         </div>
                     ))}
                 </div>

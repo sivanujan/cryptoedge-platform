@@ -12,11 +12,11 @@ export default function StatCard({ label, value, sub, icon: Icon, color = 'cyan'
 
     return (
         <div className="card" style={{
-            padding: '16px 18px',
-            display: 'flex', flexDirection: 'column', gap: 10,
+            padding: '14px 16px',
+            display: 'flex', flexDirection: 'column', gap: 8,
             background: 'var(--bg-card)',
             position: 'relative', overflow: 'hidden',
-            flex: 1,
+            flex: '1 1 140px', minWidth: 140,
         }}>
             {/* BG glow */}
             <div style={{

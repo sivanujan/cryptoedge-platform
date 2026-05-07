@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Signal History{% endblock %}
+{% block subtitle %}Full log of generated signals and their outcomes{% endblock %}
+
+{% block content %}
+<div class="cyber-card overflow-hidden">
+    <table class="w-full text-left border-collapse">
+        <thead>
+            <tr class="bg-white/5 border-b border-white/10">
+                <th class="p-4 text-[10px] text-slate-500 uppercase font-bold tracking-widest">COIN</th>
+                <th class="p-4 text-[10px] text-slate-500 uppercase font-bold tracking-widest">TYPE</th>
+                <th class="p-4 text-[10px] text-slate-500 uppercase font-bold tracking-widest">ENTRY PRICE</th>
+                <th class="p-4 text-[10px] text-slate-500 uppercase font-bold tracking-widest">TARGETS</th>
+                <th class="p-4 text-[10px] text-slate-500 uppercase font-bold tracking-widest">CONFIDENCE</th>
+                <th class="p-4 text-[10px] text-slate-500 uppercase font-bold tracking-widest">VOLATILITY</th>
+                <th class="p-4 text-[10px] text-slate-500 uppercase font-bold tracking-widest">STATUS</th>
+                <th class="p-4 text-[10px] text-slate-500 uppercase font-bold tracking-widest">CREATED AT</th>
+                <th class="p-4 text-[10px] text-slate-500 uppercase font-bold tracking-widest">ACTION</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for signal in signals %}
+            <tr class="border-b border-white/5 hover:bg-white/[0.02] transition-colors cursor-pointer" onclick="window.open('https://www.tradingview.com/chart/?symbol=BINANCE:{{ signal.coin.symbol.split(':')[0].replace('/', '') }}.P', '_blank')">
+                <td class="p-4">
+                    <div class="font-bold text-cyan-400">{{ signal.coin.symbol.split(':')[0] }}</div>
+                    <div class="text-[10px] text-slate-500 font-mono">{{ signal.timeframe }}</div>
+                </td>
+                <td class="p-4">
+                    <span class="px-2 py-1 rounded text-[10px] font-bold {% if signal.signal_type == 'BUY' %}bg-green-500/10 text-green-400{% else %}bg-red-500/10 text-red-400{% endif %}">
+                        {{ signal.signal_type }}
+                    </span>
+                </td>
+                <td class="p-4 font-mono text-sm">${{ "{:,.2f}".format(signal.entry_price) }}</td>
+                <td class="p-4">
+                    <div class="text-xs text-green-400 font-mono">TP: ${{ "{:,.2f}".format(signal.take_profit) }}</div>
+                    <div class="text-xs text-red-400 font-mono">SL: ${{ "{:,.2f}".format(signal.stop_loss) }}</div>
+                </td>
+                <td class="p-4">
+                    <span class="text-xs font-mono font-bold">{{ signal.confidence }}%</span>
+                </td>
+                <td class="p-4">
+                    <span class="text-xs font-mono">{{ signal.volatility or '—' }}%</span>
+                </td>
+                <td class="p-4">
+                    <span class="px-2 py-1 rounded text-[10px] font-bold uppercase border border-white/10">
+                        {{ signal.status }}
+                    </span>
+                </td>
+                <td class="p-4 text-slate-500 text-xs font-mono">
+                    {{ signal.created_at.strftime('%Y-%m-%d %H:%M') }}
+                </td>
+                <td class="p-4">
+                    <button class="text-cyan-400 hover:text-white">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
