@@ -215,7 +215,17 @@ def run_strategy_backtest(strategy_id):
         if not strategy:
             return jsonify({"error": "Strategy not found"}), 404
         
-        coins = db.query(Coin).filter_by(is_active=True).all()
+        data = request.get_json(silent=True) or {}
+        selected_coin_ids = data.get("coin_ids", [])
+        
+        if selected_coin_ids:
+            coins = db.query(Coin).filter(Coin.id.in_(selected_coin_ids), Coin.is_active==True).all()
+        else:
+            coins = db.query(Coin).filter_by(is_active=True).all()
+            
+        if not coins:
+            return jsonify({"error": "No active coins found for backtest"}), 400
+            
         job_id = f"job_{strategy_id}_{int(datetime.utcnow().timestamp())}"
         
         # DETACH all necessary info before starting thread (avoids session conflicts)

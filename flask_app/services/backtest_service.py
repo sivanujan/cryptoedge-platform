@@ -282,17 +282,16 @@ def _simulate_trades(df: pd.DataFrame, strategy) -> Dict[str, Any]:
 
 def _get_limit_for_timeframe(timeframe: str, months: int) -> int:
     # We need enough data for indicators (EMA 200) + the backtest period.
-    # Binance usually allows up to 1000 candles per fetch.
-    mapping = {"1m": 1500, "5m": 1500, "15m": 1500, "1h": 1000, "4h": 500, "1d": 500}
-    limit = mapping.get(timeframe, 1000)
-    
-    # Ensure 1d has enough for 6 months (approx 180 days) + EMA 200 buffer
-    if timeframe == "1d":
-        return 500 
-    if timeframe == "4h":
-        return 700
-        
-    return limit
+    # Increased limits to get more trades (approx 100+ trades per coin).
+    mapping = {
+        "1m": 50000, 
+        "5m": 50000, 
+        "15m": 50000, 
+        "1h": 25000, 
+        "4h": 10000, 
+        "1d": 3000
+    }
+    return mapping.get(timeframe, 2000)
 
 
 def _save_backtest_result(
@@ -333,19 +332,24 @@ def _save_backtest_result(
     db.commit()
 
 
-def assign_best_strategies(db: Session):
+def assign_best_strategies(db: Session, min_win_rate: float = 0.0, timeframe: str = None) -> int:
     """
     For each coin, find the best performing strategy+timeframe
     using a Weighted Win Rate (WWR) to favor statistical significance.
     WWR = WinRate * min(trades, 10) / 10
     """
     coins = db.query(Coin).filter_by(is_active=True).all()
+    assigned_count = 0
+    
     for coin in coins:
-        results = (
-            db.query(BacktestResult)
-            .filter(BacktestResult.coin_id == coin.id, BacktestResult.win_rate.isnot(None))
-            .all()
+        query = db.query(BacktestResult).filter(
+            BacktestResult.coin_id == coin.id, 
+            BacktestResult.win_rate >= min_win_rate
         )
+        if timeframe:
+            query = query.filter(BacktestResult.timeframe == timeframe)
+            
+        results = query.all()
         
         if not results:
             continue
@@ -380,5 +384,8 @@ def assign_best_strategies(db: Session):
                     win_rate=best.win_rate,
                 )
                 db.add(mapping)
+            assigned_count += 1
+            
     db.commit()
-    logger.info("Best strategies assigned to all coins using weighted scoring.")
+    logger.info(f"Best strategies assigned to {assigned_count} coins using weighted scoring.")
+    return assigned_count

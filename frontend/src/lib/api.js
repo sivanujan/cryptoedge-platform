@@ -44,7 +44,7 @@ export const API = {
     clearSignalHistory: () => api.delete('/signals/history').then(r => r.data),
     getBacktestResults: (params) => api.get('/backtest/results', { params }).then(r => r.data),
     runBacktest: (body) => api.post('/backtest/run', body).then(r => r.data),
-    runStrategyBacktest: (id) => api.post(`/backtest/run-strategy/${id}`).then(r => r.data),
+    runStrategyBacktest: (id, data) => api.post(`/backtest/run-strategy/${id}`, data).then(r => r.data),
     runAllBacktests: () => api.post('/backtest/run-all').then(r => r.data),
     getBacktestProgress: (jobId) => pollApi.get(`/backtest/progress/${jobId}`).then(r => r.data),
     getBacktestTable: (strategyId) => api.get(`/backtest/results/table`, { params: { strategy_id: strategyId } }).then(r => r.data),
@@ -66,4 +66,10 @@ export const API = {
         headers: { 'Content-Type': 'multipart/form-data' }
     }).then(r => r.data),
     getFuturesLongShort: (params) => api.get('/futures/top-long-short', { params }).then(r => r.data),
+    getJournalTrades: (params) => api.get('/journal/trades', { params }).then(r => r.data),
+    getJournalSummary: () => api.get('/journal/summary').then(r => r.data),
+    getJournalCoins: () => api.get('/journal/coins').then(r => r.data),
+    getJournalMistakes: () => api.get('/journal/mistakes').then(r => r.data),
+    refreshJournal: () => api.post('/journal/refresh').then(r => r.data),
+    getJournalCalendar: () => api.get('/journal/calendar').then(r => r.data),
 }

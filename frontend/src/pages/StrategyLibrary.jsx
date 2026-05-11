@@ -289,8 +289,10 @@ function BacktestProgressModal({ strategyName, jobId, onClose, onComplete }) {
         return () => clearInterval(interval)
     }, [jobId, onComplete])
 
-    const pct = progress ? Math.min((progress.completed / Math.max(progress.total_tests, 1)) * 100, 100) : 0
-    const eta = progress ? Math.ceil(((progress.total_tests - progress.completed) * 0.15) / 60) : 0
+    const totalTests = progress?.total_tests || 0
+    const completed = progress?.completed || 0
+    const pct = totalTests > 0 ? Math.min((completed / totalTests) * 100, 100) : 0
+    const eta = totalTests > 0 ? Math.ceil(((totalTests - completed) * 0.15) / 60) : 0
 
     return (
         <div style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(9,14,26,0.85)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -311,8 +313,8 @@ function BacktestProgressModal({ strategyName, jobId, onClose, onComplete }) {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                         <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)', marginBottom: 6 }}>
-                                <span>Progress: {progress.completed}/{progress.total_tests} tests</span>
-                                <span>{pct.toFixed(1)}%</span>
+                                <span>Progress: {completed} / {totalTests || '...'} tests</span>
+                                <span>{totalTests > 0 ? `${pct.toFixed(1)}%` : 'Initializing...'}</span>
                             </div>
                             <div style={{ height: 6, background: 'var(--bg-secondary)', borderRadius: 3, overflow: 'hidden' }}>
                                 <div style={{ height: '100%', width: `${pct}%`, background: 'var(--cyan)', transition: 'width 0.5s linear' }}></div>
@@ -405,7 +407,7 @@ function StrategyResultsTable({ strategyId }) {
             }
             else if (sortCol === 'BEST TF') { va = a.best_timeframe || ''; vb = b.best_timeframe || ''; }
             else if (sortCol === 'BEST WIN%') { va = a.best_win_rate || 0; vb = b.best_win_rate || 0; }
-            else if (sortCol === 'TRADES') { va = a.results[a.best_timeframe]?.trades || 0; vb = b.results[b.best_timeframe]?.trades || 0; }
+            else if (sortCol === 'TRADES (BEST)') { va = a.results[a.best_timeframe]?.trades || 0; vb = b.results[b.best_timeframe]?.trades || 0; }
             else if (sortCol === 'RETURN%') { va = a.results[a.best_timeframe]?.return_pct || 0; vb = b.results[b.best_timeframe]?.return_pct || 0; }
             else if (sortCol === 'DRAWDOWN') { va = a.results[a.best_timeframe]?.drawdown || 0; vb = b.results[b.best_timeframe]?.drawdown || 0; }
 
@@ -421,13 +423,17 @@ function StrategyResultsTable({ strategyId }) {
     const thStyle = { fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)', padding: '12px 16px', textAlign: 'left', cursor: 'pointer', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }
     const tdStyle = { fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-primary)', padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.02)', whiteSpace: 'nowrap' }
 
-    const renderCell = (wr) => {
+    const renderCell = (wr, trades) => {
         if (wr === undefined || wr === null) return <span style={{ color: 'var(--text-dim)' }}>—</span>
         let bg = 'transparent', color = 'var(--text-primary)'
         if (wr >= 65) { bg = 'rgba(0,255,170,0.15)'; color = 'var(--green)'; }
         else if (wr >= 50) { bg = 'rgba(255,214,0,0.15)'; color = 'var(--yellow)'; }
         else { bg = 'rgba(255,51,102,0.15)'; color = 'var(--red)'; }
-        return <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, background: bg, color, fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>{wr.toFixed(1)}%</span>
+        return (
+            <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, background: bg, color, fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12 }}>
+                {wr.toFixed(1)}% {trades !== undefined && trades !== null ? <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 2 }}>({trades})</span> : ''}
+            </span>
+        )
     }
 
     if (isLoading) return (
@@ -478,7 +484,7 @@ function StrategyResultsTable({ strategyId }) {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
                         <tr>
-                            {['COIN', 'STRATEGY', '5m', '15m', '1h', '2h', '4h', '1d', 'BEST TF', 'BEST WIN%', 'TRADES', 'RETURN%', 'DRAWDOWN'].map(col => (
+                            {['COIN', 'STRATEGY', '5m', '15m', '1h', '2h', '4h', '1d', 'BEST TF', 'BEST WIN%', 'TRADES (BEST)', 'RETURN%', 'DRAWDOWN'].map(col => (
                                 <th key={col} style={thStyle} onClick={() => handleSort(col)}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                         {col}
@@ -505,15 +511,15 @@ function StrategyResultsTable({ strategyId }) {
                                 <tr key={`${row.coin}-${row.strategy_id}`} style={{ background: i % 2 === 0 ? 'rgba(255,255,255,0.01)' : 'transparent', borderLeft }}>
                                     <td style={{ ...tdStyle, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--cyan)' }}>{row.coin}</td>
                                     <td style={{ ...tdStyle, color: 'var(--text-secondary)', fontSize: 11 }}>{row.strategy}</td>
-                                    <td style={tdStyle}>{renderCell(row.results['5m']?.win_rate)}</td>
-                                    <td style={tdStyle}>{renderCell(row.results['15m']?.win_rate)}</td>
-                                    <td style={tdStyle}>{renderCell(row.results['1h']?.win_rate)}</td>
-                                    <td style={tdStyle}>{renderCell(row.results['2h']?.win_rate)}</td>
-                                    <td style={tdStyle}>{renderCell(row.results['4h']?.win_rate)}</td>
-                                    <td style={tdStyle}>{renderCell(row.results['1d']?.win_rate)}</td>
+                                    <td style={tdStyle}>{renderCell(row.results['5m']?.win_rate, row.results['5m']?.trades)}</td>
+                                    <td style={tdStyle}>{renderCell(row.results['15m']?.win_rate, row.results['15m']?.trades)}</td>
+                                    <td style={tdStyle}>{renderCell(row.results['1h']?.win_rate, row.results['1h']?.trades)}</td>
+                                    <td style={tdStyle}>{renderCell(row.results['2h']?.win_rate, row.results['2h']?.trades)}</td>
+                                    <td style={tdStyle}>{renderCell(row.results['4h']?.win_rate, row.results['4h']?.trades)}</td>
+                                    <td style={tdStyle}>{renderCell(row.results['1d']?.win_rate, row.results['1d']?.trades)}</td>
                                     <td style={{ ...tdStyle, color: 'var(--cyan)', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{row.best_timeframe || '—'}</td>
                                     <td style={tdStyle}>{renderCell(row.best_win_rate)}</td>
-                                    <td style={{ ...tdStyle, fontFamily: 'var(--font-mono)' }}>{bestRes.trades || 0}</td>
+                                    <td style={{ ...tdStyle, fontFamily: 'var(--font-mono)' }}>{bestRes.trades || 0} ({row.best_timeframe})</td>
                                     <td style={{ ...tdStyle, fontFamily: 'var(--font-mono)', color: bestRes.return_pct > 0 ? 'var(--green)' : bestRes.return_pct < 0 ? 'var(--red)' : 'var(--text-dim)' }}>
                                         {bestRes.return_pct ? `${bestRes.return_pct > 0 ? '+' : ''}${bestRes.return_pct.toFixed(2)}%` : '—'}
                                     </td>
@@ -572,14 +578,84 @@ function StrategyTableModal({ strategy, onClose }) {
 }
 
 
+function SelectCoinsModal({ onClose, onConfirm, coins }) {
+    const [selectedIds, setSelectedIds] = useState([])
+    const [selectAll, setSelectAll] = useState(false)
+
+    useEffect(() => {
+        if (selectAll) {
+            setSelectedIds(coins.map(c => c.id))
+        } else {
+            setSelectedIds([])
+        }
+    }, [selectAll, coins])
+
+    const handleToggle = (id) => {
+        setSelectedIds(prev => 
+            prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+        )
+    }
+
+    const handleSubmit = (e) => {
+        e.preventDefault()
+        if (selectedIds.length === 0) {
+            toast.error('Please select at least one coin')
+            return
+        }
+        onConfirm(selectedIds)
+    }
+
+    return (
+        <div style={{
+            position: 'fixed', inset: 0, zIndex: 100,
+            background: 'rgba(9,14,26,0.88)', backdropFilter: 'blur(6px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }} onClick={e => e.target === e.currentTarget && onClose()}>
+            <div className="card" style={{ width: 480, maxHeight: '80vh', overflowY: 'auto', padding: 28, position: 'relative' }}>
+                <button onClick={onClose} style={{ position: 'absolute', top: 14, right: 14, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)' }}>
+                    <X size={18} />
+                </button>
+                <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 18, marginBottom: 20, color: 'var(--text-primary)' }}>
+                    Select Coins for Backtest
+                </div>
+                
+                <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={selectAll} onChange={e => setSelectAll(e.target.checked)} />
+                        <span style={{ color: 'var(--text-primary)', fontSize: 14, fontWeight: 600 }}>Select All Coins</span>
+                    </label>
+                </div>
+
+                <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, maxHeight: '40vh', overflowY: 'auto', padding: '10px 5px' }} className="custom-scrollbar">
+                        {coins.map(coin => (
+                            <label key={coin.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 6, border: selectedIds.includes(coin.id) ? '1px solid var(--cyan)' : '1px solid var(--border)', transition: 'all 0.2s' }}>
+                                <input type="checkbox" checked={selectedIds.includes(coin.id)} onChange={() => handleToggle(coin.id)} />
+                                <span style={{ color: selectedIds.includes(coin.id) ? 'var(--cyan)' : 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{coin.symbol}</span>
+                            </label>
+                        ))}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+                        <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+                        <button type="submit" className="btn-primary" style={{ minWidth: 120 }}>Run Backtest</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    )
+}
+
 // ─── Main page ─────────────────────────────
 export default function StrategyLibrary() {
-    const [showModal, setShowModal] = useState(false)
+        const [showModal, setShowModal] = useState(false)
     const [showDebugPanel, setShowDebugPanel] = useState(false)
     const [selectedStrategy, setSelectedStrategy] = useState(null)
     const [showTableModal, setShowTableModal] = useState(false)
     const [localStrategies, setLocalStrategies] = useState(loadLocalStrategies)
     const [jobProgress, setJobProgress] = useState(null)
+    const [showCoinSelect, setShowCoinSelect] = useState(false)
+    const [targetStrategyId, setTargetStrategyId] = useState(null)
 
     const qc = useQueryClient()
 
@@ -587,6 +663,11 @@ export default function StrategyLibrary() {
         queryKey: ['strategies'],
         queryFn: API.getStrategies,
         retry: 1,
+    })
+
+    const { data: coinsData } = useQuery({
+        queryKey: ['coins'],
+        queryFn: API.getCoins,
     })
 
     const { mutateAsync: createStrategy } = useMutation({
@@ -650,11 +731,17 @@ export default function StrategyLibrary() {
     }
 
     const handleRunBacktest = async (id) => {
+        setTargetStrategyId(id)
+        setShowCoinSelect(true)
+    }
+
+    const handleConfirmBacktest = async (coinIds) => {
+        setShowCoinSelect(false)
         try {
-            const res = await API.runStrategyBacktest(id)
+            const res = await API.runStrategyBacktest(targetStrategyId, { coin_ids: coinIds })
             if (res?.job_id) {
-                const strat = [...(serverStrategiesData?.strategies || []), ...localStrategies].find(s => s.id === id)
-                setJobProgress({ id: res.job_id, name: strat?.name || 'Strategy', strategy: strat || { id } })
+                const strat = [...(serverStrategiesData?.strategies || []), ...localStrategies].find(s => s.id === targetStrategyId)
+                setJobProgress({ id: res.job_id, name: strat?.name || 'Strategy', strategy: strat || { id: targetStrategyId } })
             } else {
                 toast.success('Backtest started')
             }
@@ -736,6 +823,14 @@ export default function StrategyLibrary() {
             {showTableModal && <StrategyTableModal strategy={selectedStrategy} onClose={() => setShowTableModal(false)} />}
 
             {showModal && <AddStrategyModal onClose={() => setShowModal(false)} onSave={handleSave} isOffline={isOffline} />}
+
+            {showCoinSelect && (
+                <SelectCoinsModal 
+                    onClose={() => setShowCoinSelect(false)} 
+                    onConfirm={handleConfirmBacktest} 
+                    coins={coinsData || []} 
+                />
+            )}
 
             {jobProgress && (
                 <BacktestProgressModal
