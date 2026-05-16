@@ -57,7 +57,95 @@ async def get_ai_analysis(symbol: str, tf_analysis: dict, sentiment: dict, bench
 
     news_summary = "\n".join([f"- {n.get('title', 'No title')[:80]}" for n in news[:3]]) if news else "No recent news"
 
-    prompt = f"""You are an expert crypto trading analyst. Analyze {symbol} and provide actionable insights.
+    prompt = f"""You are a professional crypto technical analyst. When analyzing a trading pair, you MUST provide a comprehensive deep scan report covering ALL of the following sections. Never give short or incomplete responses. Structure your response exactly as follows:
+
+---
+
+## 📊 DEEP TECHNICAL ANALYSIS: {symbol}
+
+### 1. TREND ANALYSIS
+- Primary Trend (Daily/Weekly): [BULLISH/BEARISH/SIDEWAYS] — explain why
+- Secondary Trend (4H/1H): [direction + reasoning]
+- Trend Strength: [Strong/Moderate/Weak] — based on ADX if available
+- Market Structure: [Higher Highs/Lower Lows/Consolidation] — describe key levels
+
+### 2. MOMENTUM INDICATORS
+- RSI (14): [value] — Overbought/Oversold/Neutral, divergence if any
+- MACD: [Signal — Bullish crossover/Bearish crossover/Converging/Diverging]
+- Stochastic RSI: [value] — interpretation
+- CCI (20): [value] — interpretation
+- Momentum bias: [Overall bullish/bearish/neutral]
+
+### 3. VOLUME ANALYSIS
+- Volume trend: [Increasing/Decreasing/Flat]
+- Volume vs Price action: [Confirming/Diverging]
+- OBV (On-Balance Volume): [Rising/Falling]
+- Notable volume spikes: [describe any significant volume events]
+
+### 4. SUPPORT & RESISTANCE LEVELS
+- Major Resistance: [price levels — list top 3]
+- Major Support: [price levels — list top 3]
+- Key Psychological Levels: [round numbers or historical levels]
+- Nearest S/R to current price: [specify]
+
+### 5. MOVING AVERAGES
+- EMA 9: [value + price relation: above/below]
+- EMA 21: [value + price relation]
+- EMA 50: [value + price relation]
+- EMA 200: [value + price relation]
+- MA Bias: [Bullish stack / Bearish stack / Mixed]
+- Golden/Death Cross status: [present or recent?]
+
+### 6. VOLATILITY ANALYSIS
+- Bollinger Bands: [Upper/Mid/Lower values, where price is, bandwidth expanding/contracting]
+- ATR (14): [value] — is volatility high or low relative to recent history?
+- Squeeze status: [In squeeze / Expanding / Normal]
+
+### 7. CHART PATTERNS
+- Detected patterns: [e.g., Head & Shoulders, Double Top, Bull Flag, Wedge, Triangle]
+- Pattern status: [Forming / Completed / Broken]
+- Price target from pattern: [if applicable]
+
+### 8. FIBONACCI LEVELS
+- Recent swing high: [price]
+- Recent swing low: [price]
+- Key Fib levels: 0.236 / 0.382 / 0.5 / 0.618 / 0.786 [with prices]
+- Current price position relative to Fibs: [describe]
+
+### 9. MARKET SENTIMENT
+- Fear & Greed Index: [value + label if available]
+- Funding Rate (Futures): [positive/negative/neutral — bullish or bearish signal]
+- Long/Short Ratio: [if available]
+- Overall Sentiment: [Bullish/Bearish/Neutral]
+
+### 10. TRADE SETUP (REQUIRED - ALWAYS INCLUDE)
+- Bias: [LONG / SHORT / NO TRADE]
+- Confidence Score: [0-100%]
+- Entry Zone: [exact price range]
+- Stop Loss: [exact price + % distance from entry]
+- Take Profit 1: [price + R:R]
+- Take Profit 2: [price + R:R]
+- Take Profit 3: [price + R:R]
+- Risk/Reward Ratio: [e.g. 1:3.2]
+- Timeframe: [recommended timeframe]
+- Entries to AVOID: [list specific price zones/conditions to avoid entering]
+- Best entry condition: [exactly what must happen before entering]
+
+### 11. SUMMARY & AI INSIGHT
+Write a 3–5 sentence professional summary of the overall market condition, what the key signals are telling you, what risks exist, and what a trader should watch for. Be specific with price levels and percentages.
+
+---
+
+⚠️ IMPORTANT RULES:
+- Never say "Analysis complete" as a final answer. That is not acceptable.
+- Always fill in ALL sections above.
+- NEVER skip the trade setup section.
+- ALWAYS give specific price numbers, never vague ranges.
+- ALWAYS specify what entries to avoid and why.
+- If no trade, explain exactly what conditions would trigger a valid setup.
+- If live data is not available, use the most recent data provided and state assumptions clearly.
+- Highlight confluences (when multiple indicators agree).
+- Flag any conflicting signals clearly.
 
 CURRENT MARKET DATA:
 {symbol} Technical Analysis (multiple timeframes):
@@ -71,18 +159,8 @@ Recent News:
 
 Market Sentiment: Score={sentiment.get('score', 0)} ({sentiment.get('label', 'Neutral')})
 
-Provide a JSON response with these fields:
-{{
-  "summary": "2-3 sentence summary of the coin's current state",
-  "trend": "BULLISH, BEARISH, or NEUTRAL",
-  "key_levels": {{"support": ["price1", "price2"], "resistance": ["price1", "price2"]}},
-  "signals": ["list of potential trade signals with reasoning"],
-  "risk_assessment": "LOW, MEDIUM, or HIGH with explanation",
-  "ai_confidence": 0-100,
-  "recommendation": "STRONG BUY, BUY, HOLD, SELL, or STRONG SELL"
-}}
-
-Be concise and actionable. Focus on the most important technical levels and signals."""
+IMPORTANT: Do NOT respond with JSON. Do NOT wrap your response in ```json blocks. Respond with plain structured text only, using the exact section format above. Your response will be displayed directly to the user.
+"""
 
     # Try NVIDIA first
     if NVIDIA_API_KEY:
@@ -94,7 +172,7 @@ Be concise and actionable. Focus on the most important technical levels and sign
             payload = {
                 "model": NVIDIA_MODEL,
                 "messages": [
-                    {"role": "system", "content": "You are a professional crypto trading analyst with expertise in technical analysis, sentiment analysis, and risk management. Provide clear, actionable insights in JSON format."},
+                    {"role": "system", "content": "You are a professional crypto trading analyst with expertise in technical analysis, sentiment analysis, and risk management. Provide clear, actionable insights in raw markdown format. Do NOT use JSON."},
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": 0.2,
@@ -113,59 +191,127 @@ Be concise and actionable. Focus on the most important technical levels and sign
         except Exception as e:
             logger.error(f"NVIDIA analysis failed: {e}. Falling back...")
 
+    # Try Ollama (Kimi Cloud) as requested by user
+    try:
+        import os
+        from ollama import chat
+        
+        # Set the key in environment just in case the library or provider expects it
+        os.environ["OLLAMA_API_KEY"] = "62fa8232560443a1a517d1fb0d5a50bd.OtOJe9_wETAKMvcMkYInysav"
+        
+        logger.info(f"Calling Ollama (Kimi Cloud) for {symbol} analysis...")
+        response = chat(
+            model='kimi-k2.6:cloud',
+            messages=[
+                {"role": "system", "content": "You are a professional crypto trading analyst. Provide clear, actionable insights in raw markdown format. Do NOT use JSON."},
+                {"role": "user", "content": prompt}
+            ],
+        )
+        content = response.message.content
+        if content:
+            return _parse_ai_content(content, symbol)
+    except Exception as e:
+        logger.error(f"Ollama (Kimi Cloud) failed: {e}. Falling back to OpenRouter...")
+
+    # Try Moonshot AI (Kimi) directly as fallback using the provided key
+    try:
+        headers = {
+            "Authorization": "Bearer 62fa8232560443a1a517d1fb0d5a50bd.OtOJe9_wETAKMvcMkYInysav",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "moonshot-v1-8k",
+            "messages": [
+                {"role": "system", "content": "You are a professional crypto trading analyst. Provide clear, actionable insights in raw markdown format. Do NOT use JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.3,
+        }
+        logger.info(f"Calling Moonshot AI (Kimi) directly for {symbol} analysis...")
+        import requests
+        response = requests.post("https://api.moonshot.cn/v1/chat/completions", json=payload, headers=headers, timeout=45)
+        
+        if response.status_code == 200:
+            data = response.json()
+            content = data["choices"][0]["message"]["content"]
+            return _parse_ai_content(content, symbol)
+        else:
+            logger.warning(f"Moonshot AI failed: Status {response.status_code}. Falling back to OpenRouter...")
+    except Exception as e:
+        logger.error(f"Moonshot AI exception: {e}. Falling back to OpenRouter...")
+
+    # Try Google Gemini as fallback since the key is in .env
+    try:
+        google_api_key = os.getenv("GOOGLE_API_KEY")
+        if google_api_key:
+            # Strip quotes if present
+            google_api_key = google_api_key.strip('"\'')
+            logger.info(f"Calling Google Gemini for {symbol} analysis...")
+            import google.generativeai as genai
+            genai.configure(api_key=google_api_key)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content(prompt)
+            content = response.text
+            if content:
+                return _parse_ai_content(content, symbol)
+    except Exception as e:
+        logger.error(f"Google Gemini failed: {e}. Falling back to OpenRouter...")
+
     # Fallback to OpenRouter
     if OPENROUTER_API_KEY:
-        try:
-            headers = {
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "HTTP-Referer": "http://localhost:5174",
-                "X-Title": "CryptoEdge Deep Analysis",
-            }
-            payload = {
-                "model": OPENROUTER_MODEL,
-                "messages": [
-                    {"role": "system", "content": "You are a professional crypto trading analyst."},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.3,
-                "max_tokens": 800,
-            }
-            logger.info(f"Calling OpenRouter AI for {symbol} analysis...")
-            response = requests.post(OPENROUTER_URL, json=payload, headers=headers, timeout=45)
-            if response.status_code == 200:
-                data = response.json()
-                content = data["choices"][0]["message"]["content"]
-                return _parse_ai_content(content, symbol)
-        except Exception as e:
-            logger.error(f"OpenRouter fallback failed: {e}")
+        models = [
+            OPENROUTER_MODEL,
+            "google/gemma-4-31b-it:free",
+            "google/gemma-4-26b-a4b-it:free",
+            "poolside/laguna-m.1:free"
+        ]
+        # Remove duplicates while preserving order
+        models = list(dict.fromkeys(models))
+        
+        last_error = "No models tried"
+        for model in models:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "HTTP-Referer": "http://localhost:5174",
+                    "X-Title": "CryptoEdge Deep Analysis",
+                }
+                payload = {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": "You are a professional crypto trading analyst. Provide clear, actionable insights in raw markdown format. Do NOT use JSON."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 1500,
+                }
+                logger.info(f"Calling OpenRouter AI with model {model} for {symbol} analysis...")
+                response = requests.post(OPENROUTER_URL, json=payload, headers=headers, timeout=45)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    content = data["choices"][0]["message"]["content"]
+                    return _parse_ai_content(content, symbol)
+                else:
+                    last_error = f"Status {response.status_code}: {response.text}"
+                    logger.warning(f"OpenRouter model {model} failed: {last_error}")
+            except Exception as e:
+                last_error = str(e)
+                logger.error(f"OpenRouter exception with model {model}: {e}")
+                continue
 
-    return {"error": "AI analysis unavailable", "insight": "All AI providers failed"}
+    return {"error": "AI analysis unavailable", "insight": f"All AI providers failed. Last error: {last_error}"}
 
 def _parse_ai_content(content: str, symbol: str) -> dict:
-    """Helper to parse JSON from AI response."""
-    import json
+    """Helper to parse AI response. Now just returns the raw markdown."""
+    # Strip any potential leading/trailing code block fences if the AI ignored instructions
     import re
-    try:
-        # Find JSON in response
-        json_match = re.search(r'\{[^{}]*\}', content, re.DOTALL)
-        if json_match:
-            ai_result = json.loads(json_match.group())
-            return {
-                "insight": ai_result.get("summary", "Analysis complete"),
-                "trend": ai_result.get("trend", "NEUTRAL"),
-                "key_levels": ai_result.get("key_levels", {"support": [], "resistance": []}),
-                "signals": ai_result.get("signals", []),
-                "risk_assessment": ai_result.get("risk_assessment", "MEDIUM"),
-                "ai_confidence": ai_result.get("ai_confidence", 50),
-                "recommendation": ai_result.get("recommendation", "HOLD"),
-                "raw_analysis": content[:500]
-            }
-    except Exception:
-        pass
-
-    # Return as text if JSON parsing fails
+    cleaned = content.strip()
+    cleaned = re.sub(r"^```(?:markdown|text)?\n?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\n?```$", "", cleaned)
+    
     return {
-        "insight": content[:300] + "..." if len(content) > 300 else content,
+        "insight": cleaned.strip(),
         "trend": "NEUTRAL",
         "risk_assessment": "MEDIUM",
         "ai_confidence": 50,

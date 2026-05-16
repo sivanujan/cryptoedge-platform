@@ -1,17 +1,21 @@
 import { NavLink } from 'react-router-dom'
 import {
     LayoutDashboard, FlaskConical, BookOpen,
-    History, Settings, Activity, Zap, TrendingUp, TrendingDown, Filter
+    History, Settings, Activity, Zap, TrendingUp, TrendingDown, Filter, Cpu, Target, Award
 } from 'lucide-react'
 
 const NAV = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+    { to: '/journal', icon: BookOpen, label: 'Journal' },
     { to: '/backtest', icon: FlaskConical, label: 'Backtests' },
     { to: '/strategies', icon: BookOpen, label: 'Strategies' },
     { to: '/screener', icon: Filter, label: 'Screener' },
+    { to: '/elite-picks', icon: Award, label: 'Elite Picks' },
     { to: '/signals', icon: History, label: 'Signals' },
     { to: '/deep-analysis', icon: Zap, label: 'Deep Analysis' },
     { to: '/futures', icon: Activity, label: 'Futures' },
+    { to: '/autotrader', icon: Cpu, label: 'AutoTrader' },
+    { to: '/signal-engine', icon: Target, label: 'Signal Engine' },
     { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 

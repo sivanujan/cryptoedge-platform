@@ -22,7 +22,7 @@ def get_exchange() -> ccxt.binance:
             "apiKey": os.getenv("BINANCE_API_KEY", ""),
             "secret": os.getenv("BINANCE_SECRET_KEY", ""),
             "enableRateLimit": True,
-            "options": {"defaultType": "spot"},
+            "options": {"defaultType": "spot", "adjustForTimeDifference": True},
         })
     return _exchange
 
@@ -35,7 +35,7 @@ def get_swap_exchange() -> ccxt.binance:
             "apiKey": os.getenv("BINANCE_API_KEY", ""),
             "secret": os.getenv("BINANCE_SECRET_KEY", ""),
             "enableRateLimit": True,
-            "options": {"defaultType": "swap"},
+            "options": {"defaultType": "swap", "adjustForTimeDifference": True},
         })
     return _swap_exchange
 
@@ -51,7 +51,7 @@ def get_delivery_exchange() -> ccxt.binance:
             "apiKey": os.getenv("BINANCE_API_KEY", ""),
             "secret": os.getenv("BINANCE_SECRET_KEY", ""),
             "enableRateLimit": True,
-            "options": {"defaultType": "future"},
+            "options": {"defaultType": "future", "adjustForTimeDifference": True},
         })
     return _delivery_exchange
 
@@ -86,21 +86,113 @@ def get_ohlcv(symbol: str, timeframe: str = "1h", limit: int = 1000) -> Optional
     """
     Fetch OHLCV candle data for a symbol.
     Returns a DataFrame with columns: open_time, open, high, low, close, volume
+    Supports fetching more than 1000 candles via pagination.
+    Includes a disk cache with incremental loading (gets missing data).
     """
+    cache_dir = os.path.join(os.path.dirname(__file__), "..", "cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    safe_symbol = symbol.replace("/", "_").replace(":", "_")
+    # Single file per coin/timeframe to grow over time
+    cache_file = os.path.join(cache_dir, f"ohlcv_{safe_symbol}_{timeframe}.csv")
+    
+    df = None
+    
+    # 1. Try to load from Disk Cache
+    if os.path.exists(cache_file):
+        try:
+            df = pd.read_csv(cache_file, index_col="open_time", parse_dates=True)
+            logger.info(f"Loaded {len(df)} candles from disk cache for {symbol}")
+        except Exception as e:
+            logger.warning(f"Failed to read disk cache {cache_file}: {e}")
+            df = None
+
     try:
         exchange = get_swap_exchange()
-        raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
-        if not raw:
-            return None
+        
+        # 2. Determine how much data to fetch
+        if df is not None and not df.empty:
+            # Incremental load: get data since last timestamp
+            last_time = df.index[-1]
+            
+            from datetime import datetime, timedelta
+            # Update if data is missing for more than 10 minutes to keep it fresh for scanners
+            # (Memory cache will prevent hitting Binance too frequently)
+            if datetime.utcnow() - last_time < timedelta(minutes=10):
+                logger.debug(f"Disk cache is very fresh for {symbol} (last candle: {last_time}). Skipping download.")
+                return df
+                
+            since_ms = int(last_time.timestamp() * 1000) + 1 # +1 ms to avoid duplicates
+            
+            # Fetch missing candles
+            raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms)
+            
+            if raw:
+                new_df = pd.DataFrame(raw, columns=["open_time", "open", "high", "low", "close", "volume"])
+                new_df["open_time"] = pd.to_datetime(new_df["open_time"], unit="ms")
+                new_df = new_df.set_index("open_time")
+                new_df = new_df.astype(float)
+                
+                # Combine
+                df = pd.concat([df, new_df])
+                # Drop duplicates just in case
+                df = df[~df.index.duplicated(keep='last')]
+                
+                # Save back to cache
+                df.to_csv(cache_file)
+                logger.info(f"Appended {len(raw)} new candles to cache for {symbol}")
+            else:
+                logger.info(f"No new candles for {symbol}")
+                
+        else:
+            # Full load (no cache exists)
+            if limit <= 1000:
+                raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+            else:
+                # Pagination to fetch more than 1000 candles
+                ms_map = {"1m": 60000, "5m": 300000, "15m": 900000, "1h": 3600000, "4h": 14400000, "1d": 86400000}
+                ms_per_candle = ms_map.get(timeframe, 3600000)
+                
+                now_ms = exchange.milliseconds()
+                since_ms = now_ms - (limit * ms_per_candle)
+                
+                raw = []
+                current_since = since_ms
+                import time
+                while len(raw) < limit:
+                    fetch_limit = min(1000, limit - len(raw))
+                    ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=current_since, limit=fetch_limit)
+                    if not ohlcv:
+                        break
+                    raw.extend(ohlcv)
+                    current_since = ohlcv[-1][0] + 1
+                    time.sleep(0.1)
+                    
+                raw = raw[-limit:]
 
-        df = pd.DataFrame(raw, columns=["open_time", "open", "high", "low", "close", "volume"])
-        df["open_time"] = pd.to_datetime(df["open_time"], unit="ms")
-        df = df.set_index("open_time")
-        df = df.astype(float)
+            if not raw:
+                return None
+
+            df = pd.DataFrame(raw, columns=["open_time", "open", "high", "low", "close", "volume"])
+            df["open_time"] = pd.to_datetime(df["open_time"], unit="ms")
+            df = df.set_index("open_time")
+            df = df.astype(float)
+            
+            # Save to disk cache
+            try:
+                df.to_csv(cache_file)
+                logger.info(f"Saved {len(df)} candles to new cache for {symbol}")
+            except Exception as e:
+                logger.warning(f"Failed to save disk cache {cache_file}: {e}")
+
+        # 3. Trim to the requested limit (latest ones) for the backtest
+        if df is not None and len(df) > limit:
+            df = df.iloc[-limit:]
+            
         return df
+        
     except Exception as e:
         logger.warning(f"Error fetching OHLCV for {symbol} [{timeframe}]: {e}")
-        return None
+        return df if df is not None and not df.empty else None # Return cache if available even if fetch fails
 
 
 def get_current_price(symbol: str) -> Optional[float]:

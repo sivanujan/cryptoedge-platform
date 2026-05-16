@@ -216,7 +216,7 @@ def list_all_strategies(db: Session = Depends(get_db)):
 @router.delete("/{strategy_id}")
 def delete_strategy(strategy_id: int, db: Session = Depends(get_db)):
     """Permanent delete of a strategy and all its associated data (signals, trades, results)."""
-    from database.models import Signal, Trade, BacktestResult, CoinStrategyMap
+    from database.models import Signal, Trade, BacktestResult, CoinStrategyMap, CoinResult, SignalHistory, StrategyRanking
     
     strategy = db.query(Strategy).filter_by(id=strategy_id).first()
     if not strategy:
@@ -238,8 +238,13 @@ def delete_strategy(strategy_id: int, db: Session = Depends(get_db)):
     
     # 5. Delete coin maps
     db.query(CoinStrategyMap).filter_by(strategy_id=strategy_id).delete(synchronize_session=False)
+
+    # 6. Delete CoinResult, SignalHistory, and StrategyRanking records
+    db.query(CoinResult).filter_by(strategy_id=strategy_id).delete(synchronize_session=False)
+    db.query(SignalHistory).filter_by(strategy_id=strategy_id).delete(synchronize_session=False)
+    db.query(StrategyRanking).filter_by(strategy_id=strategy_id).delete(synchronize_session=False)
     
-    # 6. Delete the strategy itself (Hard delete)
+    # 7. Delete the strategy itself (Hard delete)
     db.delete(strategy)
     
     db.commit()

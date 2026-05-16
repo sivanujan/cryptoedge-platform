@@ -123,9 +123,16 @@ def convert_pine_to_python(pine_script: str, strategy_name: str = "") -> str:
         "temperature": 0.1,
     }
 
-    # Try OpenRouter FIRST (User requested for timeout troubleshooting)
+    # Try OpenRouter FIRST (User requested to use new key/free models)
     if OPENROUTER_API_KEY:
-        fallback_models = [OPENROUTER_MODEL, "meta-llama/llama-3.3-70b-instruct:free", "google/gemma-4-31b-it:free"]
+        fallback_models = [
+            OPENROUTER_MODEL, 
+            "meta-llama/llama-3.3-70b-instruct:free", 
+            "google/gemma-2-9b-it:free",
+            "mistralai/mistral-7b-instruct:free",
+            "microsoft/phi-3-medium-128k-instruct:free",
+            "qwen/qwen-2-72b-instruct:free"
+        ]
         headers = {
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
             "HTTP-Referer": "http://localhost:5174",

@@ -18,7 +18,7 @@ def _signal_to_dict(s: Signal, current_prices: dict = None) -> dict:
     
     # Get current price from passed dict or fallback
     current_price = None
-    if s.status == "active" and current_prices and s.coin.symbol in current_prices:
+    if s.status in ["active", "wait"] and current_prices and s.coin.symbol in current_prices:
         current_price = current_prices[s.coin.symbol]
     elif s.status != "active":
         current_price = exit_price
@@ -54,6 +54,12 @@ def _signal_to_dict(s: Signal, current_prices: dict = None) -> dict:
         "pnl_percent": pnl,
         "ai_analysis": s.ai_analysis,
         "ai_score": s.ai_score,
+        "structure_sl": s.structure_sl,
+        "structure_tp": s.structure_tp,
+        "sl_pct": s.sl_pct,
+        "tp_pct": s.tp_pct,
+        "rr_ratio": s.rr_ratio,
+        "sl_method": s.sl_method,
         "created_at": s.created_at.isoformat() + "Z" if s.created_at else None,
     }
 
@@ -72,7 +78,7 @@ def get_signal(signal_id):
             return jsonify({"status": "error", "message": "Signal not found"}), 404
             
         current_prices = {}
-        if s.status == "active":
+        if s.status in ["active", "wait"]:
              from services.binance_service import get_multiple_tickers
              tickers_data = get_multiple_tickers([s.coin.symbol])
              current_prices = {sym: data["last"] for sym, data in tickers_data.items() if data.get("last")}
@@ -92,6 +98,7 @@ def signal_history():
         coin_filter = request.args.get("coin")
         strategy_filter = request.args.get("strategy")
         signal_type = request.args.get("signal_type")
+        result_filter = request.args.get("result")
         limit = int(request.args.get("limit", 50))
         offset = int(request.args.get("offset", 0))
 
@@ -100,14 +107,22 @@ def signal_history():
         if coin_filter:
             query = query.join(Coin).filter(Coin.symbol.ilike(f"%{coin_filter}%"))
 
+        if strategy_filter:
+            query = query.join(Strategy).filter(Strategy.name.ilike(f"%{strategy_filter}%"))
+
         if signal_type:
             query = query.filter(Signal.signal_type == signal_type.upper())
+            
+        if result_filter == "win":
+            query = query.filter(Signal.status == "closed")
+        elif result_filter == "loss":
+            query = query.filter(Signal.status == "stopped")
 
         total = query.count()
         signals = query.order_by(Signal.created_at.desc()).offset(offset).limit(limit).all()
 
         # Fetch current prices for active signals using the more robust multi-ticker service
-        active_symbols = [s.coin.symbol for s in signals if s.status == "active"]
+        active_symbols = [s.coin.symbol for s in signals if s.status in ["active", "wait"]]
         current_prices = {}
         if active_symbols:
             from services.binance_service import get_multiple_tickers
@@ -133,18 +148,11 @@ def signal_history():
         wins_count = int(sum(1 for s in all_signals if is_win(s)))
         losses_count = int(sum(1 for s in all_signals if is_loss(s)))
         
-        # Fallback to BacktestResult if no real trades
-        if wins_count == 0 and losses_count == 0:
-            total_trades_val = db.query(func.sum(BacktestResult.total_trades)).scalar() or 0
-            avg_wr = db.query(func.avg(BacktestResult.win_rate)).scalar() or 0.0
-            wins_count = int(float(total_trades_val) * float(avg_wr) / 100)
-            losses_count = int(total_trades_val) - wins_count
-            total_pnl_val = float(db.query(func.avg(BacktestResult.total_return)).scalar() or 0.0)
-        else:
-            total_pnl_val = 0.0
-            for s in all_signals:
-                if s.trades and s.trades[0].pnl_percent is not None:
-                    total_pnl_val += float(s.trades[0].pnl_percent)
+        # Calculate total PnL from real trades
+        total_pnl_val = 0.0
+        for s in all_signals:
+            if s.trades and s.trades[0].pnl_percent is not None:
+                total_pnl_val += float(s.trades[0].pnl_percent)
             
         total_rated = wins_count + losses_count
         wr = round(float(wins_count) / total_rated * 100, 1) if total_rated > 0 else 0.0
@@ -247,16 +255,80 @@ def signal_history():
 
 @signals_bp.route("/live", methods=["GET"])
 def live_signals():
-    # Reuse signal_history with limit 10
-    return signal_history()
+    """Return only active live signals."""
+    db = SessionLocal()
+    try:
+        signals = db.query(Signal).options(
+            joinedload(Signal.coin), 
+            joinedload(Signal.strategy), 
+            joinedload(Signal.trades)
+        ).filter(Signal.status == "active").order_by(Signal.created_at.desc()).limit(20).all()
+        
+        active_symbols = [s.coin.symbol for s in signals]
+        current_prices = {}
+        if active_symbols:
+            from services.binance_service import get_multiple_tickers
+            tickers_data = get_multiple_tickers(active_symbols)
+            current_prices = {sym: data["last"] for sym, data in tickers_data.items() if data.get("last")}
+
+        return jsonify({
+            "status": "success",
+            "signals": [_signal_to_dict(s, current_prices) for s in signals],
+            "total": len(signals)
+        })
+    except Exception as e:
+        logger.exception(f"Error in live_signals: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        db.close()
 
 @signals_bp.route("/history", methods=["DELETE"])
 def clear_history():
     db = SessionLocal()
     try:
+        from database.models import Trade
+        # Delete trades first to avoid foreign key constraint violations
+        db.query(Trade).delete()
         db.query(Signal).delete()
         db.commit()
         return jsonify({"status": "success"})
+    except Exception as e:
+        logger.exception(f"Error clearing signal history: {e}")
+        db.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        db.close()
+
+@signals_bp.route("/generation-status", methods=["GET"])
+def generation_status():
+    from database.models import Setting
+    db = SessionLocal()
+    try:
+        setting = db.query(Setting).filter_by(key="signal_generation_enabled").first()
+        enabled = True if not setting or setting.value == "true" else False
+        return jsonify({"status": "success", "enabled": enabled})
+    finally:
+        db.close()
+
+@signals_bp.route("/toggle-generation", methods=["POST"])
+def toggle_generation():
+    from database.models import Setting
+    data = request.json or {}
+    enabled = data.get("enabled")
+    
+    db = SessionLocal()
+    try:
+        setting = db.query(Setting).filter_by(key="signal_generation_enabled").first()
+        if not setting:
+            setting = Setting(key="signal_generation_enabled", value=str(enabled).lower())
+            db.add(setting)
+        else:
+            setting.value = str(enabled).lower()
+        db.commit()
+        return jsonify({"status": "success", "enabled": enabled})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         db.close()
 
@@ -266,3 +338,83 @@ def scan_now():
     import threading
     threading.Thread(target=run_scanner).start()
     return jsonify({"status": "success"})
+
+
+from flask import Response, stream_with_context
+from services.signal_service import generate_signal_stream
+
+@signals_bp.route("/generate-signal", methods=["POST"])
+def generate_signal():
+    """Generate a structured trade signal using AI."""
+    data = request.json or {}
+    strategy_id = data.get("strategy_id")
+    coin = data.get("coin")
+    timeframe = data.get("timeframe")
+    direction = data.get("direction", "both")
+    rr_ratio = float(data.get("rr_ratio", 2.0))
+    sl_method = data.get("sl_method", "atr")
+    account_size = float(data.get("account_size", 10000.0))
+    risk_pct = float(data.get("risk_pct", 1.0))
+    extra_context = data.get("extra_context", "")
+    
+    if not strategy_id or not coin or not timeframe:
+        return jsonify({"status": "error", "message": "Missing required fields"}), 400
+        
+    db = SessionLocal()
+    
+    def generate():
+        try:
+            for chunk in generate_signal_stream(
+                db, strategy_id, coin, timeframe, direction, 
+                rr_ratio, sl_method, account_size, risk_pct, extra_context
+            ):
+                yield chunk
+        finally:
+            db.close()
+            
+    return Response(stream_with_context(generate()), mimetype="text/plain")
+
+@signals_bp.route("/history-detailed", methods=["GET"])
+def history_detailed():
+    """Return detailed signal history from SignalHistory table."""
+    db = SessionLocal()
+    try:
+        coin_filter = request.args.get("coin")
+        strategy_filter = request.args.get("strategy_id")
+        verdict_filter = request.args.get("verdict")
+        
+        from database.models import SignalHistory
+        query = db.query(SignalHistory).options(joinedload(SignalHistory.strategy))
+        
+        if coin_filter:
+            query = query.filter(SignalHistory.coin.ilike(f"%{coin_filter}%"))
+            
+        if strategy_filter:
+            query = query.filter(SignalHistory.strategy_id == int(strategy_filter))
+            
+        if verdict_filter:
+            query = query.filter(SignalHistory.verdict == verdict_filter.upper())
+            
+        history = query.order_by(SignalHistory.created_at.desc()).all()
+        
+        result = []
+        for h in history:
+            result.append({
+                "id": h.id,
+                "strategy_id": h.strategy_id,
+                "strategy_name": h.strategy.name if h.strategy else "Unknown",
+                "coin": h.coin,
+                "timeframe": h.timeframe,
+                "verdict": h.verdict,
+                "validity_score": h.validity_score,
+                "full_signal": h.full_signal,
+                "outcome": h.outcome,
+                "created_at": h.created_at.isoformat() if h.created_at else None
+            })
+            
+        return jsonify({"status": "success", "history": result})
+    except Exception as e:
+        logger.exception(f"Error in history_detailed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        db.close()

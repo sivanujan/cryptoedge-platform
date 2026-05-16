@@ -14,7 +14,11 @@ import Screener from './pages/Screener'
 import SignalHistory from './pages/SignalHistory'
 import DeepAnalysis from './pages/DeepAnalysis'
 import FuturesAnalysis from './pages/FuturesAnalysis'
+import TradingJournal from './pages/TradingJournal'
 import Settings from './pages/Settings'
+import AutoTrader from './pages/AutoTrader'
+import SignalEngine from './pages/SignalEngine'
+import ElitePicks from './pages/ElitePicks'
 
 import { useQuery } from '@tanstack/react-query'
 import { API } from './lib/api'
@@ -54,7 +58,11 @@ function AppShell() {
             <Route path="/analysis" element={<DeepAnalysis />} />
             <Route path="/deep-analysis" element={<DeepAnalysis />} />
             <Route path="/futures" element={<FuturesAnalysis />} />
+            <Route path="/journal" element={<TradingJournal />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/autotrader" element={<AutoTrader />} />
+            <Route path="/signal-engine" element={<SignalEngine />} />
+            <Route path="/elite-picks" element={<ElitePicks />} />
           </Routes>
         </main>
       </div>

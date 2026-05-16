@@ -62,22 +62,73 @@ async def broadcast_signal(data: dict):
     _signal_connections -= dead
 
 
+def get_elite_picks_mappings(db: Session):
+    """
+    Replicates the 'Elite Picks' logic from the frontend.
+    Returns a list of mock mapping objects with coin, strategy, and timeframe.
+    """
+    from database.models import BacktestResult
+    from types import SimpleNamespace
+    
+    results = db.query(BacktestResult).filter(BacktestResult.win_rate.isnot(None)).all()
+    
+    valid_rows = []
+    for r in results:
+        if r.win_rate >= 50 and r.total_trades >= 5 and r.total_return > 0:
+            trades = r.total_trades
+            weight = 0.0
+            if trades >= 100: weight = 1.00
+            elif trades >= 50: weight = 0.90
+            elif trades >= 30: weight = 0.75
+            elif trades >= 20: weight = 0.60
+            elif trades >= 5: weight = 0.40
+            
+            effective_win = r.win_rate * weight
+            return_score = min(r.total_return / 40.0, 1.0) * 20.0
+            final_score = effective_win + return_score
+            
+            valid_rows.append({
+                "coin": r.coin,
+                "strategy": r.strategy,
+                "timeframe": r.timeframe,
+                "final_score": final_score
+            })
+            
+    coin_groups = {}
+    for row in valid_rows:
+        coin_id = row["coin"].id
+        if coin_id not in coin_groups:
+            coin_groups[coin_id] = []
+        coin_groups[coin_id].append(row)
+        
+    final_mappings = []
+    for coin_id, rows in coin_groups.items():
+        best_score = max(r["final_score"] for r in rows)
+        threshold = best_score * 0.70
+        
+        for r in rows:
+            if r["final_score"] >= threshold:
+                final_mappings.append(SimpleNamespace(
+                    coin=r["coin"],
+                    strategy=r["strategy"],
+                    timeframe=r["timeframe"]
+                ))
+                
+    return final_mappings
+
+
 def run_scanner():
     """
     Main scanner loop. Called by APScheduler every 15 minutes.
-    Loads active coin-strategy mappings, runs strategies, saves signals.
+    Loads elite picks mappings, runs strategies, saves signals.
     """
-    logger.info("Scanner started...")
+    logger.info("Scanner started (using Elite Picks)...")
     db: Session = SessionLocal()
     try:
-        mappings = (
-            db.query(CoinStrategyMap)
-            .filter_by(is_active=True)
-            .all()
-        )
+        mappings = get_elite_picks_mappings(db)
 
         if not mappings:
-            logger.warning("No active coin-strategy mappings found, skipping scan.")
+            logger.warning("No elite picks mappings found, skipping scan.")
             return
 
         # Fetch global risk settings

@@ -17,6 +17,8 @@ from blueprints.analysis_bp import analysis_bp
 from blueprints.futures_bp import futures_bp
 from blueprints.dashboard_bp import dashboard_bp
 from blueprints.scanner_bp import scanner_bp
+from blueprints.journal_bp import journal_bp
+from autotrader import autotrader_bp, start_engine
 
 load_dotenv()
 
@@ -44,6 +46,10 @@ with app.app_context():
     # Start scheduler
     logger.info("Starting scheduler...")
     start_scheduler()
+    
+    # Start autotrader engine
+    logger.info("Starting autotrader engine...")
+    start_engine()
 
 # Register Blueprints
 app.register_blueprint(strategies_bp)
@@ -54,6 +60,8 @@ app.register_blueprint(analysis_bp)
 app.register_blueprint(futures_bp)
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(scanner_bp)
+app.register_blueprint(journal_bp)
+app.register_blueprint(autotrader_bp)
 
 @app.route("/api/v1/settings", methods=["GET", "POST"])
 def api_settings():
@@ -79,6 +87,15 @@ def api_settings():
 @app.route("/api/v1/health")
 def health():
     return jsonify({"status": "ok", "service": "CryptoEdge Integrated Flask API"})
+
+@app.route("/api/v1/prices")
+def get_prices():
+    try:
+        from services.binance_service import get_multiple_tickers
+        tickers = get_multiple_tickers(["BTC/USDT"])
+        return jsonify({"status": "success", "data": tickers})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 # Native WebSocket Routes
 @sock.route('/ws/prices')
@@ -128,6 +145,7 @@ def health_v1():
 @app.route('/analysis')
 @app.route('/backtest')
 @app.route('/settings')
+@app.route('/journal')
 @app.route('/')
 def spa_page():
     return send_from_directory(app.static_folder, 'index.html')
@@ -184,4 +202,5 @@ if __name__ == "__main__":
     # use_reloader=False is REQUIRED for flask-sock WebSockets to work on Windows.
     # The Werkzeug stat-based reloader intercepts the HTTP Upgrade request before
     # flask-sock can handle it, producing "Invalid frame header" on the client.
-    app.run(host="127.0.0.1", port=8000, debug=True, use_reloader=False, threaded=True)
+    # debug=False is ALSO required because Werkzeug debugger intercepts the WS frame
+    app.run(host="127.0.0.1", port=8000, debug=False, use_reloader=False, threaded=True)

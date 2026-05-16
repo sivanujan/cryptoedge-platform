@@ -42,6 +42,8 @@ export const API = {
     triggerScanNow: () => api.post('/signals/scan-now').then(r => r.data),
     getSignalHistory: (params) => api.get('/signals/history', { params }).then(r => r.data),
     clearSignalHistory: () => api.delete('/signals/history').then(r => r.data),
+    getGenerationStatus: () => api.get('/signals/generation-status').then(r => r.data),
+    toggleGeneration: (enabled) => api.post('/signals/toggle-generation', { enabled }).then(r => r.data),
     getBacktestResults: (params) => api.get('/backtest/results', { params }).then(r => r.data),
     runBacktest: (body) => api.post('/backtest/run', body).then(r => r.data),
     runStrategyBacktest: (id, data) => api.post(`/backtest/run-strategy/${id}`, data).then(r => r.data),

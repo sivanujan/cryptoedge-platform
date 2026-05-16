@@ -39,3 +39,10 @@ backend/database/backtest_results.db
 backend/database/scanner_models.db
 flask_app/cryptoedge.db
 flask_app/database.db
+flask_app/cache/
+backup/
+backend/scratch/
+flask_app/scratch/
+flask_app/scratch_*.py
+flask_app/debug_*.py
+.claude/

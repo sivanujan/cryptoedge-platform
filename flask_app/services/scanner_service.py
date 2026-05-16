@@ -1,8 +1,10 @@
 import asyncio
 import logging
+import math
 from datetime import datetime
 from typing import List, Set
 
+import pandas as pd
 from sqlalchemy.orm import Session
 
 from database.connection import SessionLocal
@@ -56,15 +58,65 @@ def run_scanner():
     logger.info("Scanner started...")
     db: Session = SessionLocal()
     try:
-        mappings = (
-            db.query(CoinStrategyMap)
-            .filter_by(is_active=True)
-            .all()
-        )
-
-        if not mappings:
-            logger.warning("No active coin-strategy mappings found, skipping scan.")
+        from database.models import Setting
+        setting = db.query(Setting).filter_by(key="signal_generation_enabled").first()
+        if setting and setting.value == "false":
+            logger.info("Signal generation is disabled. Skipping scan.")
             return
+
+        from database.models import StrategyRanking
+        rankings = db.query(StrategyRanking).all()
+
+        targets = []
+        if rankings:
+            logger.info(f"Using {len(rankings)} ranked targets from StrategyRanking.")
+            for r in rankings:
+                targets.append({
+                    "coin_symbol": r.coin,
+                    "strategy_id": r.strategy_id,
+                    "timeframe": r.timeframe
+                })
+        else:
+            logger.info("No rankings found in StrategyRanking. Falling back to CoinStrategyMap.")
+            mappings = (
+                db.query(CoinStrategyMap)
+                .filter_by(is_active=True)
+                .all()
+            )
+
+            if not mappings:
+                logger.info("No active coin-strategy mappings found. Auto-generating for top coins...")
+                active_strats = db.query(Strategy).filter_by(is_active=True).all()
+                top_coins = db.query(Coin).filter_by(is_active=True).order_by(Coin.id).limit(15).all()
+                
+                for strat in active_strats:
+                    for c in top_coins:
+                        for tf in ["15m", "1h", "4h"]:
+                            cmap = CoinStrategyMap(
+                                coin_id=c.id,
+                                strategy_id=strat.id,
+                                timeframe=tf,
+                                is_active=True
+                            )
+                            db.add(cmap)
+                db.commit()
+                
+                mappings = (
+                    db.query(CoinStrategyMap)
+                    .filter_by(is_active=True)
+                    .all()
+                )
+
+            if not mappings:
+                logger.warning("Still no active mappings, skipping scan.")
+                return
+                
+            for m in mappings:
+                targets.append({
+                    "coin_symbol": m.coin.symbol,
+                    "strategy_id": m.strategy_id,
+                    "timeframe": m.timeframe
+                })
 
         # Fetch global risk settings
         from database.models import Setting
@@ -74,50 +126,80 @@ def run_scanner():
         global_tp = float(settings.get("default_tp_pct", 4.0))
 
         generated = 0
-        for mapping in mappings:
+        for target in targets:
             try:
-                coin: Coin = mapping.coin
-                strategy_obj: Strategy = mapping.strategy
+                coin_symbol = target["coin_symbol"]
+                strategy_id = target["strategy_id"]
+                timeframe = target["timeframe"]
 
-                df = get_ohlcv(coin.symbol, mapping.timeframe, limit=300)
+                coin = db.query(Coin).filter_by(symbol=coin_symbol).first()
+                strategy_obj = db.query(Strategy).filter_by(id=strategy_id).first()
+                
+                if not coin or not strategy_obj:
+                    logger.warning(f"Target missing coin or strategy in DB: {coin_symbol}, Strategy ID: {strategy_id}")
+                    continue
+
+                df = get_ohlcv(coin.symbol, timeframe, limit=300)
                 if df is None or len(df) < 50:
                     continue
 
                 df = add_all_indicators(df)
                 df = df.dropna()
+                
+                if df.empty or len(df) < 5:
+                    logger.warning(f"Dataframe too small after indicators for {coin.symbol}, skipping.")
+                    continue
 
                 strategy = get_strategy(strategy_obj, strategy_obj.parameters)
                 df = strategy.generate_signals(df)
 
-                last_signal = int(df["signal"].iloc[-1])
-                # Use .item() to safely convert numpy/Series to Python scalar
-                try:
-                    last_confidence = float(df["confidence"].iloc[-1]) if "confidence" in df.columns else 70.0
-                except (TypeError, ValueError):
+                # Look for any non-zero signal in recent candles (not just last one)
+                recent_signals = df[df['signal'] != 0].tail(3)
+                if len(recent_signals) == 0:
+                    last_signal = 0
+                else:
+                    # Get the most recent non-zero signal
+                    last_sig_row = recent_signals.iloc[-1]
+                    last_signal = int(last_sig_row['signal'])
+                    # Use the price at that signal time
+                    last_close = float(last_sig_row['close'])
+                    # Get confidence/volatility from that row
+                    try:
+                        last_confidence = float(last_sig_row['confidence']) if 'confidence' in last_sig_row else 70.0
+                    except (TypeError, ValueError):
+                        last_confidence = 70.0
+                    try:
+                        last_volatility = float(last_sig_row['volatility_atr']) if 'volatility_atr' in last_sig_row and not math.isnan(float(last_sig_row['volatility_atr'])) else None
+                    except (TypeError, ValueError):
+                        last_volatility = None
+
+                # If no signal in recent candles, get last close price
+                if last_signal == 0:
+                    try:
+                        last_close = float(df["close"].iloc[-1])
+                    except (TypeError, ValueError):
+                        logger.warning(f"Could not extract close price for {coin.symbol}, skipping")
+                        continue
                     last_confidence = 70.0
-
-                try:
-                    last_volatility = float(df["volatility_atr"].iloc[-1]) if "volatility_atr" in df.columns else None
-                except (TypeError, ValueError):
                     last_volatility = None
-
-                try:
-                    last_close = float(df["close"].iloc[-1])
-                except (TypeError, ValueError):
-                    logger.warning(f"Could not extract close price for {coin.symbol}, skipping")
-                    continue
 
                 if last_signal in (1, -1):
                     signal_type = "BUY" if last_signal == 1 else "SELL"
                     
-                    # Update strategy params with global defaults if not present
-                    if "maxDrawdownPct" not in strategy.params:
-                        strategy.params["maxDrawdownPct"] = global_sl
-
-                    sl = strategy.calculate_stop_loss(last_close, signal_type)
-                    # Adjust TP ratio if global TP is set
-                    tp_ratio = global_tp / global_sl if global_sl > 0 else 2.0
-                    tp = strategy.calculate_take_profit(last_close, signal_type, ratio=tp_ratio)
+                    # Check gap between signal price and current price
+                    current_market_price = get_current_price(coin.symbol)
+                    if current_market_price:
+                        gap_pct = abs(current_market_price - last_close) / last_close * 100
+                        if gap_pct > 1.0: # Skip if gap is more than 1%
+                            logger.info(f"Skipping signal for {coin.symbol} due to large gap ({gap_pct:.2f}%)")
+                            continue
+                            
+                    # Calculate Structure-based SL/TP
+                    from services.structure_service import calculate_structure_sl_tp
+                    struct_data = calculate_structure_sl_tp(df, last_close, signal_type, global_sl, global_tp)
+                    
+                    sl = struct_data["structure_sl"]
+                    tp = struct_data["structure_tp"]
 
                     # Avoid duplicate signals within same candle
                     recent = (
@@ -143,8 +225,14 @@ def run_scanner():
                         take_profit=tp,
                         confidence=round(last_confidence, 1),
                         volatility=round(last_volatility, 2) if last_volatility is not None else None,
-                        timeframe=mapping.timeframe,
-                        status="active",
+                        timeframe=timeframe,
+                        status="wait",
+                        structure_sl=struct_data["structure_sl"],
+                        structure_tp=struct_data["structure_tp"],
+                        sl_pct=struct_data["sl_pct"],
+                        tp_pct=struct_data["tp_pct"],
+                        rr_ratio=struct_data["rr_ratio"],
+                        sl_method=struct_data["sl_method"]
                     )
                     db.add(sig)
                     db.flush()
@@ -160,9 +248,27 @@ def run_scanner():
                         "take_profit": tp,
                         "confidence": round(last_confidence, 1),
                         "volatility": round(last_volatility, 2) if last_volatility is not None else None,
-                        "timeframe": mapping.timeframe,
+                        "timeframe": timeframe,
                         "created_at": datetime.utcnow().isoformat() + "Z",
                     })
+
+                    # --- CALL AI SIGNAL GENERATOR ---
+                    try:
+                        from services.signal_service import generate_signal_stream
+                        direction = "long" if signal_type == "BUY" else "short"
+                        
+                        # Consume the stream to trigger save and execution
+                        for _ in generate_signal_stream(
+                            db, strategy_obj.id, coin.symbol, timeframe, direction,
+                            rr_ratio=2.0, sl_method="atr", account_size=10000.0, risk_pct=1.0,
+                            extra_context="Detected by background scanner.",
+                            entry_price=last_close, sl_price=sl, tp_price=tp
+                        ):
+                            pass
+                            
+                        logger.info(f"AI signal generated for {coin.symbol}")
+                    except Exception as ai_err:
+                        logger.error(f"Failed to generate AI signal in scanner: {ai_err}")
 
                     # --- SEND TELEGRAM ALERT ---
                     emoji = "🟢" if signal_type == "BUY" else "🔴"
@@ -172,7 +278,7 @@ def run_scanner():
                     msg = (
                         f"🚨 <b>CRYPTOEDGE {signal_type} SIGNAL</b> 🚨\n\n"
                         f"{emoji} <b>Coin:</b> #{clean_symbol}\n"
-                        f"⏱ <b>Timeframe:</b> {mapping.timeframe}\n"
+                        f"⏱ <b>Timeframe:</b> {timeframe}\n"
                         f"📈 <b>Strategy:</b> {strategy_obj.name}\n"
                         f"🎯 <b>Price:</b> {last_close}\n\n"
                         f"🛑 <b>SL:</b> {sl}\n"
@@ -183,10 +289,11 @@ def run_scanner():
                     send_telegram_message(msg)
 
             except Exception as e:
-                logger.warning(f"Scanner error for {mapping.coin.symbol}: {e}")
+                import traceback
+                logger.warning(f"Scanner error for {coin.symbol}: {e}\n{traceback.format_exc()}")
 
         db.commit()
-        logger.info(f"Scanner finished. Generated {generated} new signals from {len(mappings)} coins.")
+        logger.info(f"Scanner finished. Generated {generated} new signals from {len(targets)} targets.")
 
     except Exception as e:
         logger.error(f"Scanner fatal error: {e}")

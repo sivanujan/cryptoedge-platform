@@ -48,6 +48,13 @@ def list_strategies():
                 "avg_win_rate": round(avg_map.get(s.id, 0.0), 1),
                 "has_python_code": bool(s.python_code),
                 "has_pine_script": bool(s.pine_script),
+                # New fields for Strategy Signal Engine
+                "coins_tested": s.coins_tested,
+                "timeframes": s.timeframes,
+                "best_win_rate": s.best_win_rate,
+                "best_tf": s.best_tf,
+                "coins_above_65": s.coins_above_65,
+                "tags": s.tags,
                 "created_at": s.created_at.isoformat() if s.created_at else None,
             })
         return jsonify({"strategies": result})
@@ -82,6 +89,13 @@ def create_strategy():
             pine_script=pine_script,
             parameters=params,
             is_active=True,
+            # New fields for Strategy Signal Engine
+            coins_tested=data.get("coins_tested"),
+            timeframes=data.get("timeframes"),
+            best_win_rate=data.get("best_win_rate"),
+            best_tf=data.get("best_tf"),
+            coins_above_65=data.get("coins_above_65"),
+            tags=data.get("tags"),
         )
         db.add(strategy)
         db.commit()
@@ -182,5 +196,136 @@ def delete_strategy(strategy_id):
         db.delete(strategy)
         db.commit()
         return jsonify({"status": "success"})
+    finally:
+        db.close()
+
+@strategies_bp.route("/<int:strategy_id>/import-results", methods=["POST"])
+def import_coin_results(strategy_id):
+    """Bulk import coin results from CSV or JSON."""
+    db = SessionLocal()
+    try:
+        data = request.json or {}
+        results_data = data.get("results")
+        format_type = data.get("format", "json") # "csv" or "json"
+        
+        if not results_data:
+            return jsonify({"status": "error", "message": "No data provided"}), 400
+            
+        from database.models import CoinResult, Strategy
+        
+        strategy = db.query(Strategy).filter_by(id=strategy_id).first()
+        if not strategy:
+            return jsonify({"status": "error", "message": "Strategy not found"}), 404
+            
+        imported_count = 0
+        
+        if format_type == "json":
+            for item in results_data:
+                coin = item.get("coin")
+                if not coin: continue
+                
+                existing = db.query(CoinResult).filter_by(strategy_id=strategy_id, coin=coin).first()
+                if existing:
+                    db.delete(existing)
+                    
+                coin_result = CoinResult(
+                    strategy_id=strategy_id,
+                    coin=coin,
+                    tf_results=item.get("tf_results"),
+                    best_tf=item.get("best_tf"),
+                    best_win_rate=item.get("best_win_rate"),
+                    trades_at_best=item.get("trades_at_best"),
+                    return_pct=item.get("return_pct"),
+                    drawdown=item.get("drawdown")
+                )
+                db.add(coin_result)
+                imported_count += 1
+                
+        elif format_type == "csv":
+            import csv
+            from io import StringIO
+            
+            f = StringIO(results_data)
+            reader = csv.DictReader(f)
+            
+            for row in reader:
+                coin = row.get("coin")
+                if not coin: continue
+                
+                tf_results = {}
+                for tf in ["5m", "15m", "1h", "2h", "4h", "1d"]:
+                    win = row.get(f"{tf}_win")
+                    trades = row.get(f"{tf}_trades")
+                    if win is not None and trades is not None:
+                        tf_results[tf] = {
+                            "win_rate": float(win) if win else 0.0,
+                            "trades": int(trades) if trades else 0
+                        }
+                        
+                existing = db.query(CoinResult).filter_by(strategy_id=strategy_id, coin=coin).first()
+                if existing:
+                    db.delete(existing)
+                    
+                # Infer best_win_rate and trades_at_best from tf_results if not in CSV
+                best_tf = row.get("best_tf")
+                best_win = float(row.get("best_win_rate")) if row.get("best_win_rate") else None
+                trades_at_best = int(row.get("trades_at_best")) if row.get("trades_at_best") else None
+                
+                if best_tf and not best_win and best_tf in tf_results:
+                    best_win = tf_results[best_tf]["win_rate"]
+                    trades_at_best = tf_results[best_tf]["trades"]
+                    
+                coin_result = CoinResult(
+                    strategy_id=strategy_id,
+                    coin=coin,
+                    tf_results=tf_results,
+                    best_tf=best_tf,
+                    best_win_rate=best_win,
+                    trades_at_best=trades_at_best,
+                    return_pct=float(row.get("return_pct")) if row.get("return_pct") else None,
+                    drawdown=float(row.get("drawdown")) if row.get("drawdown") else None
+                )
+                db.add(coin_result)
+                imported_count += 1
+                
+        db.commit()
+        
+        # Calculate rankings after import
+        from services.ranking_service import calculate_and_store_rankings
+        calculate_and_store_rankings(db, strategy_id)
+        
+        return jsonify({"status": "success", "message": f"Imported {imported_count} results and updated rankings"})
+    except Exception as e:
+        db.rollback()
+        logger.exception(f"Error in import_coin_results: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        db.close()
+
+
+@strategies_bp.route("/<int:strategy_id>/rankings", methods=["GET"])
+def get_strategy_rankings(strategy_id):
+    """Fetch stored rankings for a strategy."""
+    db = SessionLocal()
+    try:
+        from database.models import StrategyRanking
+        rankings = db.query(StrategyRanking).filter_by(strategy_id=strategy_id).order_by(StrategyRanking.final_score.desc()).all()
+        
+        result = []
+        for r in rankings:
+            result.append({
+                "id": r.id,
+                "coin": r.coin,
+                "timeframe": r.timeframe,
+                "win_rate": r.win_rate,
+                "trades": r.trades,
+                "confidence": r.confidence,
+                "final_score": r.final_score
+            })
+            
+        return jsonify({"status": "success", "rankings": result})
+    except Exception as e:
+        logger.exception(f"Error in get_strategy_rankings: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         db.close()

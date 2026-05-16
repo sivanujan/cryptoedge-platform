@@ -11,3 +11,4 @@ numpy>=1.26.0
 cryptography>=42.0.0
 websockets>=12.0
 ta>=0.11.0
+python-binance>=1.0.19

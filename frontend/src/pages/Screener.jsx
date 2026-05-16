@@ -9,7 +9,7 @@ export default function Screener() {
     const qc = useQueryClient()
     const [search, setSearch] = useState('')
     const [minTrades, setMinTrades] = useState(5)
-    const [minWinRate, setMinWinRate] = useState(65)
+    const [minWinRate, setMinWinRate] = useState(50)
     const [strategyFilter, setStrategyFilter] = useState('ALL')
     const [timeframeFilter, setTimeframeFilter] = useState('ALL')
     const [selectedRows, setSelectedRows] = useState(new Set())
@@ -55,8 +55,8 @@ export default function Screener() {
         return flatResults.filter(r => {
             if (strategyFilter !== 'ALL' && r.strategy !== strategyFilter) return false
             if (timeframeFilter !== 'ALL' && r.timeframe !== timeframeFilter) return false
-            if (r.trades < minTrades) return false
-            if (r.win_rate < minWinRate) return false
+            if (Number(r.trades) < Number(minTrades)) return false
+            if (Number(r.win_rate) < Number(minWinRate)) return false
             if (search) {
                 const s = search.toLowerCase()
                 if (!r.coin.toLowerCase().includes(s) && !r.strategy.toLowerCase().includes(s)) return false
@@ -166,14 +166,14 @@ export default function Screener() {
                     />
                 </div>
 
-                <select className="select-input" value={strategyFilter} onChange={e => setStrategyFilter(e.target.value)} style={{ padding: '8px 12px', minWidth: 150 }}>
-                    <option value="ALL">All Strategies</option>
-                    {strategies.map(s => <option key={s} value={s}>{s}</option>)}
+                <select className="select-input" value={strategyFilter} onChange={e => setStrategyFilter(e.target.value)} style={{ padding: '8px 12px', minWidth: 150, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '8px' }}>
+                    <option value="ALL" style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>All Strategies</option>
+                    {strategies.map(s => <option key={s} value={s} style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>{s}</option>)}
                 </select>
 
-                <select className="select-input" value={timeframeFilter} onChange={e => setTimeframeFilter(e.target.value)} style={{ padding: '8px 12px', minWidth: 100 }}>
-                    <option value="ALL">All TFs</option>
-                    {timeframes.map(s => <option key={s} value={s}>{s}</option>)}
+                <select className="select-input" value={timeframeFilter} onChange={e => setTimeframeFilter(e.target.value)} style={{ padding: '8px 12px', minWidth: 100, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '8px' }}>
+                    <option value="ALL" style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>All TFs</option>
+                    {timeframes.map(s => <option key={s} value={s} style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>{s}</option>)}
                 </select>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '0 12px' }}>

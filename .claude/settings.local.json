@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -c:*)"
+      "Bash(python -c:*)",
+      "Bash(python scratch/test_binance.py)",
+      "Bash(python debug_trades.py)",
+      "Bash(python -m py_compile autotrader/engine.py)",
+      "Bash(python -m py_compile services/scanner_service.py)"
     ]
   }
 }

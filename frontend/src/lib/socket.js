@@ -47,13 +47,28 @@ function createReconnectingWs(path, onMessage, onOpen, onClose) {
     }
 }
 
-// Price WebSocket hook
 export function usePriceSocket() {
     const [prices, setPrices] = useState({})
     const [connected, setConnected] = useState(false)
     const wsRef = useRef(null)
 
     useEffect(() => {
+        // Fallback polling in case WebSocket fails
+        const fetchFallback = async () => {
+            try {
+                const res = await fetch('/api/v1/prices')
+                const json = await res.json()
+                if (json.status === 'success' && json.data) {
+                    setPrices((prev) => ({ ...prev, ...json.data }))
+                }
+            } catch (e) {
+                console.error("Fallback price fetch failed:", e)
+            }
+        }
+        
+        fetchFallback()
+        const interval = setInterval(fetchFallback, 10000) // Poll every 10s
+
         wsRef.current = createReconnectingWs(
             '/ws/prices',
             (data) => {
@@ -64,7 +79,10 @@ export function usePriceSocket() {
             () => setConnected(true),
             () => setConnected(false),
         )
-        return () => wsRef.current?.destroy()
+        return () => {
+            wsRef.current?.destroy()
+            clearInterval(interval)
+        }
     }, [])
 
     return { prices, connected }

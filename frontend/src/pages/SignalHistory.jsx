@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Filter, X, ExternalLink, ArrowUpRight, ArrowDownRight, Target, ShieldAlert, History, Trash2, Zap, Cpu } from 'lucide-react'
 import { API } from '../lib/api'
 import LoadingSpinner from '../components/LoadingSpinner'
+import toast from 'react-hot-toast'
 
 function SignalDetailsModal({ signal, onClose }) {
     if (!signal) return null
@@ -11,6 +12,14 @@ function SignalDetailsModal({ signal, onClose }) {
     const [livePrice, setLivePrice] = useState(signal.current_price)
     const [livePnl, setLivePnl] = useState(signal.pnl_percent)
     const [isRefreshing, setIsRefreshing] = useState(false)
+    
+    // Entry Panel State
+    const [showEntryPanel, setShowEntryPanel] = useState(false)
+    const [leverage, setLeverage] = useState(10)
+    const [positionSize, setPositionSize] = useState('')
+    const [customEntry, setCustomEntry] = useState(signal.entry_price || '')
+    const [selectedSLMode, setSelectedSLMode] = useState('structure') // 'structure' or 'safe'
+
 
     useEffect(() => {
         if (signal.status !== 'active') return
@@ -48,10 +57,46 @@ function SignalDetailsModal({ signal, onClose }) {
     const recommendedLeverage = riskPct > 0 ? Math.floor(20 / riskPct) : 10 // Targeting max 20% margin loss
     const isHighRisk = riskPct > 3
 
+    // --- Liquidation Logic ---
+    const lev = Number(leverage) > 0 ? Number(leverage) : 1
+    const entryPriceNum = Number(customEntry) || signal.entry_price || 0
+    const structureSL = signal.structure_sl || signal.stop_loss || 0
+    const structureTP = signal.structure_tp || signal.take_profit || 0
+    
+    let liquidationPrice = 0
+    let isStructureSLUnsafe = false
+    let safeSL = 0
+    
+    if (entryPriceNum > 0) {
+        if (signal.signal_type === 'BUY') {
+            liquidationPrice = entryPriceNum * (1 - (1 / lev) + 0.005)
+            isStructureSLUnsafe = structureSL <= liquidationPrice
+            safeSL = liquidationPrice * 1.10
+        } else {
+            liquidationPrice = entryPriceNum * (1 + (1 / lev) - 0.005)
+            isStructureSLUnsafe = structureSL >= liquidationPrice
+            safeSL = liquidationPrice * 0.90
+        }
+    }
+    
+    // Auto-switch to safe if structure becomes unsafe when leverage changes
+    useEffect(() => {
+        if (isStructureSLUnsafe) setSelectedSLMode('safe')
+        else setSelectedSLMode('structure')
+    }, [isStructureSLUnsafe, leverage])
+
+    const handleConfirmTrade = () => {
+        const finalSL = selectedSLMode === 'safe' ? safeSL : structureSL
+        toast.success(`Trade Executed!\nEntry: ${entryPriceNum}\nSL: ${finalSL}\nTP: ${structureTP}\nLeverage: ${lev}x\nMargin: $${positionSize}`)
+        setShowEntryPanel(false)
+    }
+
+
     return (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }} onClick={onClose}>
-            <div className="card" style={{ maxWidth: 500, width: '100%', padding: 24, position: 'relative', display: 'flex', flexDirection: 'column', gap: 20 }} onClick={e => e.stopPropagation()}>
+            <div className="card" style={{ maxWidth: 500, width: '100%', maxHeight: '90vh', overflowY: 'auto', padding: 24, position: 'relative', display: 'flex', flexDirection: 'column', gap: 20 }} onClick={e => e.stopPropagation()}>
                 <button onClick={onClose} style={{ position: 'absolute', top: 16, right: 16, background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer' }}><X size={20} /></button>
+
                 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(0,229,255,0.1)', border: '1px solid var(--cyan-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -165,6 +210,90 @@ function SignalDetailsModal({ signal, onClose }) {
                     )}
                 </div>
 
+                {/* --- ENTRY PANEL --- */}
+                {!showEntryPanel ? (
+                    <button 
+                        onClick={() => setShowEntryPanel(true)} 
+                        className="cyber-button" 
+                        style={{ marginTop: 8, background: 'var(--cyan)', color: '#000', fontWeight: 800, padding: '12px', border: 'none', borderRadius: 8, cursor: 'pointer' }}
+                    >
+                        ENTER TRADE
+                    </button>
+                ) : (
+                    <div className="card" style={{ padding: 16, border: '1px solid var(--cyan-dim)', background: 'rgba(0, 229, 255, 0.03)', marginTop: 8 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                            <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--cyan)' }}>TRADE ENTRY PANEL</div>
+                            <button onClick={() => setShowEntryPanel(false)} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer' }}><X size={16} /></button>
+                        </div>
+                        
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                            <div style={{ display: 'flex', gap: 12 }}>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 4, display: 'block' }}>LEVERAGE (x)</label>
+                                    <input type="number" className="cyber-input" value={leverage} onChange={e => setLeverage(e.target.value)} style={{ width: '100%' }} />
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 4, display: 'block' }}>SIZE (USDT)</label>
+                                    <input type="number" className="cyber-input" value={positionSize} onChange={e => setPositionSize(e.target.value)} placeholder="e.g. 100" style={{ width: '100%' }} />
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 4, display: 'block' }}>ENTRY PRICE</label>
+                                <input type="number" className="cyber-input" value={customEntry} onChange={e => setCustomEntry(e.target.value)} style={{ width: '100%' }} />
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
+                                <div>
+                                    <label style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 4, display: 'block' }}>STRUCTURE TP</label>
+                                    <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: 6, padding: '10px 12px', fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--green)' }}>{fmt(structureTP)}</div>
+                                </div>
+                                <div>
+                                    <label style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 4, display: 'block' }}>LIQ. PRICE</label>
+                                    <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: 6, padding: '10px 12px', fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--red)' }}>{fmt(liquidationPrice)}</div>
+                                </div>
+                            </div>
+
+                            <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 12 }}>SELECT STOP LOSS</div>
+                                
+                                <label style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer', marginBottom: 12, opacity: isStructureSLUnsafe ? 0.5 : 1 }}>
+                                    <input type="radio" name="slMode" value="structure" checked={selectedSLMode === 'structure'} onChange={() => !isStructureSLUnsafe && setSelectedSLMode('structure')} disabled={isStructureSLUnsafe} style={{ transform: 'scale(1.2)' }} />
+                                    <div>
+                                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>Structure SL <span style={{ color: 'var(--red)', fontFamily: 'var(--font-mono)' }}>{fmt(structureSL)}</span></div>
+                                        <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Based on unmitigated swing {signal.signal_type === 'BUY' ? 'low' : 'high'}.</div>
+                                        {isStructureSLUnsafe && (
+                                            <div style={{ fontSize: 11, color: 'var(--red)', fontWeight: 700, marginTop: 6, background: 'rgba(255,23,68,0.1)', padding: '6px 10px', borderRadius: 6 }}>
+                                                ⚠️ Unsafe: Will liquidate before hitting Structure SL
+                                            </div>
+                                        )}
+                                    </div>
+                                </label>
+
+                                {isStructureSLUnsafe && (
+                                    <label style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer', background: 'rgba(0,230,118,0.05)', padding: 12, borderRadius: 8, border: '1px solid var(--green-dim)' }}>
+                                        <input type="radio" name="slMode" value="safe" checked={selectedSLMode === 'safe'} onChange={() => setSelectedSLMode('safe')} style={{ transform: 'scale(1.2)' }} />
+                                        <div>
+                                            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>Safe SL <span style={{ color: 'var(--green)', fontFamily: 'var(--font-mono)' }}>{fmt(safeSL)}</span></div>
+                                            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Leverage-adjusted to prevent liquidation (10% margin).</div>
+                                        </div>
+                                    </label>
+                                )}
+                            </div>
+                            
+                            <button 
+                                onClick={handleConfirmTrade}
+                                disabled={!positionSize || Number(positionSize) <= 0}
+                                className="cyber-button" 
+                                style={{ marginTop: 12, background: 'var(--green)', color: '#000', fontWeight: 800, padding: '12px', border: 'none', borderRadius: 8, cursor: (!positionSize || Number(positionSize) <= 0) ? 'not-allowed' : 'pointer', opacity: (!positionSize || Number(positionSize) <= 0) ? 0.5 : 1 }}
+                            >
+                                CONFIRM TRADE
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+
                 <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-dim)', fontSize: 11 }}>
                         <History size={12} />
@@ -189,6 +318,28 @@ export default function SignalHistory() {
     const [filters, setFilters] = useState({ coin: '', strategy: '', signal_type: '', result: '' })
     const [page, setPage] = useState(0)
     const [selectedSignal, setSelectedSignal] = useState(null)
+    const [generationEnabled, setGenerationEnabled] = useState(true)
+
+    useEffect(() => {
+        API.getGenerationStatus().then(res => {
+            if (res.status === 'success') {
+                setGenerationEnabled(res.enabled)
+            }
+        }).catch(err => console.error("Failed to fetch generation status", err))
+    }, [])
+
+    const handleToggleGeneration = async () => {
+        const newValue = !generationEnabled
+        try {
+            const res = await API.toggleGeneration(newValue)
+            if (res.status === 'success') {
+                setGenerationEnabled(newValue)
+                toast.success(`Signal generation ${newValue ? 'enabled' : 'disabled'}!`)
+            }
+        } catch (e) {
+            toast.error("Failed to toggle generation status.")
+        }
+    }
     const [showHighVolatility, setShowHighVolatility] = useState(false)
     const [sortVolatility, setSortVolatility] = useState(false)
     const limit = 50
@@ -265,14 +416,37 @@ export default function SignalHistory() {
                             </div>
                         ))}
                     </div>
-                    <button 
-                        className="btn-ghost" 
-                        onClick={handleClearHistory}
-                        disabled={clearMutation.isPending || (data?.total_signals === 0)}
-                        style={{ fontSize: 10, color: 'var(--red)', opacity: 0.7, padding: '4px 8px', gap: 6, display: 'flex', alignItems: 'center' }}
-                    >
-                        <Trash2 size={12} /> {clearMutation.isPending ? 'Clearing...' : 'Clear All History'}
-                    </button>
+                    <div style={{ display: 'flex', gap: 12 }}>
+                        <button 
+                            className="btn-ghost" 
+                            onClick={handleToggleGeneration}
+                            style={{ fontSize: 10, color: generationEnabled ? 'var(--green)' : 'var(--red)', opacity: 0.7, padding: '4px 8px', gap: 6, display: 'flex', alignItems: 'center' }}
+                        >
+                            <Zap size={12} /> {generationEnabled ? 'Generation: ON' : 'Generation: OFF'}
+                        </button>
+                        <button 
+                            className="btn-ghost" 
+                            onClick={async () => {
+                                try {
+                                    await API.triggerScanNow()
+                                    toast.success("Manual scan triggered in background!")
+                                } catch (e) {
+                                    toast.error("Failed to trigger scan.")
+                                }
+                            }}
+                            style={{ fontSize: 10, color: 'var(--cyan)', opacity: 0.7, padding: '4px 8px', gap: 6, display: 'flex', alignItems: 'center' }}
+                        >
+                            <Cpu size={12} /> Scan Now
+                        </button>
+                        <button 
+                            className="btn-ghost" 
+                            onClick={handleClearHistory}
+                            disabled={clearMutation.isPending || (data?.total_signals === 0)}
+                            style={{ fontSize: 10, color: 'var(--red)', opacity: 0.7, padding: '4px 8px', gap: 6, display: 'flex', alignItems: 'center' }}
+                        >
+                            <Trash2 size={12} /> {clearMutation.isPending ? 'Clearing...' : 'Clear All History'}
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -442,6 +616,7 @@ export default function SignalHistory() {
                                         <td>
                                             <span className="badge badge-active" style={
                                                 s.status === 'active' ? {} :
+                                                s.status === 'wait' ? { background: 'rgba(255,193,7,0.12)', color: 'var(--yellow)', borderColor: 'rgba(255,193,7,0.3)' } :
                                                 ['closed', 'won'].includes(s.status) ? { background: 'rgba(0,230,118,0.12)', color: 'var(--green)', borderColor: 'rgba(0,230,118,0.3)' } :
                                                 { background: 'rgba(255,23,68,0.12)', color: 'var(--red)', borderColor: 'rgba(255,23,68,0.3)' }
                                             }>

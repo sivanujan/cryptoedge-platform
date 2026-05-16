@@ -66,7 +66,7 @@ const AnalysisRichCard = memo(({ data }) => {
                 </div>
                 <div style={{ marginBottom: 24 }}>
                     <div style={{ fontSize: 11, color: 'var(--cyan)', fontWeight: 800, marginBottom: 8, letterSpacing: '0.1em' }}>AI INSIGHT</div>
-                    <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6 }}>{data.ai_analysis?.insight}</p>
+                    <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{data.ai_analysis?.insight}</p>
                 </div>
             </div>
         </div>

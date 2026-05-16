@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Filter, RefreshCw, Play, BarChart2, AlertCircle } from 'lucide-react'
 import { API } from '../lib/api'
@@ -72,6 +72,34 @@ export default function BacktestResults() {
     const [filters, setFilters] = useState({ strategy: '', timeframe: '', min_win_rate: '' })
     const [running, setRunning] = useState(false)
     const [progress, setProgress] = useState(null)
+    const [downloading, setDownloading] = useState(false)
+    const [downloadProgress, setDownloadProgress] = useState(null)
+
+    const [strategies, setStrategies] = useState([])
+    const [selectedStrategyId, setSelectedStrategyId] = useState('')
+    const [rankings, setRankings] = useState([])
+
+    useEffect(() => {
+        fetch('/api/v1/strategies')
+            .then(res => res.json())
+            .then(data => setStrategies(data.strategies || []))
+    }, [])
+
+    useEffect(() => {
+        if (selectedStrategyId) {
+            fetch(`/api/v1/strategies/${selectedStrategyId}/rankings`)
+                .then(res => res.json())
+                .then(data => setRankings(data.rankings || []))
+                
+            const strat = strategies.find(s => s.id === parseInt(selectedStrategyId))
+            if (strat) {
+                setFilters(f => ({ ...f, strategy: strat.name }))
+            }
+        } else {
+            setRankings([])
+            setFilters(f => ({ ...f, strategy: '' }))
+        }
+    }, [selectedStrategyId, strategies])
 
     const { data, isLoading, isError, refetch } = useQuery({
         queryKey: ['backtestResults', filters],
@@ -87,6 +115,34 @@ export default function BacktestResults() {
 
     const results = data?.results || []
 
+    const startDownload = async () => {
+        try {
+            setDownloading(true)
+            const res = await fetch('/api/v1/backtest/download-cache', { method: 'POST' }).then(r => r.json())
+            toast.success('Download started!')
+
+            const pollId = setInterval(async () => {
+                try {
+                    const prog = await fetch(`/api/v1/backtest/progress/${res.job_id}`).then(r => r.json())
+                    setDownloadProgress(prog)
+                    if (prog.status === 'complete' || prog.status === 'completed') {
+                        clearInterval(pollId)
+                        setDownloading(false)
+                        setDownloadProgress(null)
+                        toast.success('Download complete!')
+                    } else if (prog.status === 'error' || prog.status === 'failed') {
+                        clearInterval(pollId)
+                        setDownloading(false)
+                        toast.error('Download failed')
+                    }
+                } catch { clearInterval(pollId); setDownloading(false) }
+            }, 2000)
+        } catch {
+            setDownloading(false)
+            toast.error('Failed to start download')
+        }
+    }
+
     const startRunAll = async () => {
         try {
             setRunning(true)
@@ -97,13 +153,13 @@ export default function BacktestResults() {
                 try {
                     const prog = await API.getBacktestProgress(res.job_id)
                     setProgress(prog)
-                    if (prog.status === 'completed') {
+                    if (prog.status === 'completed' || prog.status === 'complete') {
                         clearInterval(pollId)
                         setRunning(false)
                         setProgress(null)
                         refetch()
                         toast.success('Backtest complete!')
-                    } else if (prog.status === 'failed') {
+                    } else if (prog.status === 'failed' || prog.status === 'error') {
                         clearInterval(pollId)
                         setRunning(false)
                         toast.error(`Backtest failed: ${prog.error}`)
@@ -154,10 +210,15 @@ export default function BacktestResults() {
                     <button className="btn-ghost" onClick={() => refetch()} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <RefreshCw size={13} />Refresh
                     </button>
+                    <button className="btn-secondary" onClick={startDownload} disabled={downloading}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: downloading ? 0.6 : 1 }}>
+                        <BarChart2 size={13} />
+                        {downloading ? `Downloading... ${downloadProgress?.progress ? Math.round(downloadProgress.progress) : 0}%` : 'Download Coin Data'}
+                    </button>
                     <button className="btn-primary" onClick={startRunAll} disabled={running}
                         style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: running ? 0.6 : 1 }}>
                         <Play size={13} />
-                        {running ? `Running... ${progress?.progress || 0}%` : 'Run All Backtests'}
+                        {running ? `Running... ${progress?.progress ? Math.round(progress.progress) : 0}%` : 'Run All Backtests'}
                     </button>
                 </div>
             </div>
@@ -165,7 +226,19 @@ export default function BacktestResults() {
             {/* Filter bar */}
             <div className="card" style={{ padding: '10px 14px', display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
                 <Filter size={14} color="var(--text-dim)" />
-                <input className="cyber-input" placeholder="Strategy..." value={filters.strategy}
+                
+                {/* Strategy Dropdown */}
+                <select 
+                    className="cyber-input" 
+                    value={selectedStrategyId}
+                    onChange={e => setSelectedStrategyId(e.target.value)}
+                    style={{ maxWidth: 200 }}
+                >
+                    <option value="">Select Strategy (Rankings)</option>
+                    {strategies.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+
+                <input className="cyber-input" placeholder="Strategy name filter..." value={filters.strategy}
                     onChange={e => setFilters(f => ({ ...f, strategy: e.target.value }))} style={{ maxWidth: 160 }} />
                 <select className="cyber-input" value={filters.timeframe}
                     onChange={e => setFilters(f => ({ ...f, timeframe: e.target.value }))} style={{ maxWidth: 100 }}>
@@ -174,8 +247,48 @@ export default function BacktestResults() {
                 </select>
                 <input className="cyber-input" placeholder="Min win rate %" type="number" value={filters.min_win_rate}
                     onChange={e => setFilters(f => ({ ...f, min_win_rate: e.target.value }))} style={{ maxWidth: 140 }} />
-                <button className="btn-ghost" onClick={() => setFilters({ strategy: '', timeframe: '', min_win_rate: '' })}>Clear</button>
+                <button className="btn-ghost" onClick={() => { setFilters({ strategy: '', timeframe: '', min_win_rate: '' }); setSelectedStrategyId(''); }}>Clear</button>
             </div>
+
+            {/* Rankings Table */}
+            {rankings.length > 0 && (
+                <div className="card" style={{ padding: '14px', flexShrink: 0 }}>
+                    <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 16, color: 'var(--text-primary)', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>Top Ranked Coins (Filtered & Scored)</span>
+                        <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>Confidence based on trade count</span>
+                    </div>
+                    <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                            <thead>
+                                <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-dim)' }}>
+                                    <th style={{ textAlign: 'left', padding: '8px' }}>Rank</th>
+                                    <th style={{ textAlign: 'left', padding: '8px' }}>Coin</th>
+                                    <th style={{ textAlign: 'left', padding: '8px' }}>TF</th>
+                                    <th style={{ textAlign: 'left', padding: '8px' }}>Win Rate</th>
+                                    <th style={{ textAlign: 'left', padding: '8px' }}>Trades</th>
+                                    <th style={{ textAlign: 'left', padding: '8px' }}>Weight</th>
+                                    <th style={{ textAlign: 'left', padding: '8px' }}>Final Score</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {rankings.map((r, index) => (
+                                    <tr key={r.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                        <td style={{ padding: '8px', color: 'var(--text-dim)' }}>#{index + 1}</td>
+                                        <td style={{ padding: '8px', color: 'var(--cyan)', fontWeight: 700 }}>{r.coin}</td>
+                                        <td style={{ padding: '8px' }}>
+                                            <span style={{ background: 'var(--bg-secondary)', color: 'var(--text-dim)', padding: '1px 5px', borderRadius: 3, fontFamily: 'var(--font-mono)', fontSize: 10 }}>{r.timeframe}</span>
+                                        </td>
+                                        <td style={{ padding: '8px', color: r.win_rate >= 65 ? 'var(--green)' : 'var(--yellow)' }}>{r.win_rate.toFixed(1)}%</td>
+                                        <td style={{ padding: '8px', color: 'var(--text-secondary)' }}>{r.trades}</td>
+                                        <td style={{ padding: '8px', color: 'var(--text-dim)' }}>{r.confidence.toFixed(2)}</td>
+                                        <td style={{ padding: '8px', color: 'var(--purple)', fontWeight: 700 }}>{r.final_score.toFixed(2)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
 
             {/* Content area */}
             <div className="card" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>

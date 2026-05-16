@@ -648,7 +648,7 @@ function SelectCoinsModal({ onClose, onConfirm, coins }) {
 
 // ─── Main page ─────────────────────────────
 export default function StrategyLibrary() {
-        const [showModal, setShowModal] = useState(false)
+    const [showModal, setShowModal] = useState(false)
     const [showDebugPanel, setShowDebugPanel] = useState(false)
     const [selectedStrategy, setSelectedStrategy] = useState(null)
     const [showTableModal, setShowTableModal] = useState(false)
@@ -656,6 +656,8 @@ export default function StrategyLibrary() {
     const [jobProgress, setJobProgress] = useState(null)
     const [showCoinSelect, setShowCoinSelect] = useState(false)
     const [targetStrategyId, setTargetStrategyId] = useState(null)
+    const [downloading, setDownloading] = useState(false)
+    const [downloadProgress, setDownloadProgress] = useState(null)
 
     const qc = useQueryClient()
 
@@ -754,6 +756,34 @@ export default function StrategyLibrary() {
     const serverStrategies = serverStrategiesData?.strategies || []
     const allStrategies = [...serverStrategies, ...localStrategies]
 
+    const startDownload = async () => {
+        try {
+            setDownloading(true)
+            const res = await fetch('/api/v1/backtest/download-cache', { method: 'POST' }).then(r => r.json())
+            toast.success('Download started!')
+
+            const pollId = setInterval(async () => {
+                try {
+                    const prog = await fetch(`/api/v1/backtest/progress/${res.job_id}`).then(r => r.json())
+                    setDownloadProgress(prog)
+                    if (prog.status === 'complete' || prog.status === 'completed') {
+                        clearInterval(pollId)
+                        setDownloading(false)
+                        setDownloadProgress(null)
+                        toast.success('Download complete!')
+                    } else if (prog.status === 'error' || prog.status === 'failed') {
+                        clearInterval(pollId)
+                        setDownloading(false)
+                        toast.error('Download failed')
+                    }
+                } catch { clearInterval(pollId); setDownloading(false) }
+            }, 2000)
+        } catch {
+            setDownloading(false)
+            toast.error('Failed to start download')
+        }
+    }
+
     return (
         <div style={{ 
             display: 'flex', 
@@ -771,6 +801,10 @@ export default function StrategyLibrary() {
                 <div style={{ display: 'flex', gap: 10 }}>
                     <button className="btn-ghost" onClick={() => qc.invalidateQueries(['strategies'])} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
                         <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} /> Sync
+                    </button>
+                    <button className="btn-secondary" onClick={startDownload} disabled={downloading} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <BarChart2 size={14} />
+                        {downloading ? `Downloading... ${downloadProgress?.progress ? Math.round(downloadProgress.progress) : 0}%` : 'Download Coin Data'}
                     </button>
                     <button className="btn-primary" onClick={() => setShowModal(true)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Plus size={14} />Add Strategy
