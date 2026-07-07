@@ -71,8 +71,13 @@ def run_scanner():
         if rankings:
             logger.info(f"Using {len(rankings)} ranked targets from StrategyRanking.")
             for r in rankings:
+                # Clean up coin symbol from "ZEC/USDT:USDT" or "ZEC/USDT" to "ZECUSDT"
+                clean_symbol = str(r.coin).replace("/", "").replace(":USDT", "").strip()
+                if not clean_symbol.endswith("USDT"):
+                    clean_symbol += "USDT"
+                    
                 targets.append({
-                    "coin_symbol": r.coin,
+                    "coin_symbol": clean_symbol,
                     "strategy_id": r.strategy_id,
                     "timeframe": r.timeframe
                 })
@@ -184,6 +189,23 @@ def run_scanner():
                     last_volatility = None
 
                 if last_signal in (1, -1):
+                    # Check trend first (uptrend/downtrend filter)
+                    ema_21 = df.iloc[-1].get("ema_21")
+                    ema_50 = df.iloc[-1].get("ema_50")
+                    trend_str = "neutral"
+                    if pd.notnull(ema_21) and pd.notnull(ema_50):
+                        if last_close > ema_50 and ema_21 > ema_50:
+                            trend_str = "uptrend"
+                        elif last_close < ema_50 and ema_21 < ema_50:
+                            trend_str = "downtrend"
+                            
+                    if last_signal == 1 and trend_str != "uptrend":
+                        logger.info(f"Skipping strategy BUY signal for {coin.symbol} because market is not in a confirmed uptrend (Trend: {trend_str})")
+                        continue
+                    elif last_signal == -1 and trend_str != "downtrend":
+                        logger.info(f"Skipping strategy SELL signal for {coin.symbol} because market is not in a confirmed downtrend (Trend: {trend_str})")
+                        continue
+
                     signal_type = "BUY" if last_signal == 1 else "SELL"
                     
                     # Check gap between signal price and current price
@@ -201,6 +223,11 @@ def run_scanner():
                     sl = struct_data["structure_sl"]
                     tp = struct_data["structure_tp"]
 
+                    # Filter out signals with low TP margin
+                    if struct_data.get("tp_pct", 0) < 1.0:
+                        logger.info(f"Skipping signal for {coin.symbol} - TP percentage too low: {struct_data.get('tp_pct')}% < 1%")
+                        continue
+
                     # Avoid duplicate signals within same candle
                     recent = (
                         db.query(Signal)
@@ -208,7 +235,7 @@ def run_scanner():
                             Signal.coin_id == coin.id,
                             Signal.strategy_id == strategy_obj.id,
                             Signal.signal_type == signal_type,
-                            Signal.status == "active",
+                            Signal.status.in_(["active", "wait"]),
                         )
                         .order_by(Signal.created_at.desc())
                         .first()
@@ -252,23 +279,7 @@ def run_scanner():
                         "created_at": datetime.utcnow().isoformat() + "Z",
                     })
 
-                    # --- CALL AI SIGNAL GENERATOR ---
-                    try:
-                        from services.signal_service import generate_signal_stream
-                        direction = "long" if signal_type == "BUY" else "short"
-                        
-                        # Consume the stream to trigger save and execution
-                        for _ in generate_signal_stream(
-                            db, strategy_obj.id, coin.symbol, timeframe, direction,
-                            rr_ratio=2.0, sl_method="atr", account_size=10000.0, risk_pct=1.0,
-                            extra_context="Detected by background scanner.",
-                            entry_price=last_close, sl_price=sl, tp_price=tp
-                        ):
-                            pass
-                            
-                        logger.info(f"AI signal generated for {coin.symbol}")
-                    except Exception as ai_err:
-                        logger.error(f"Failed to generate AI signal in scanner: {ai_err}")
+
 
                     # --- SEND TELEGRAM ALERT ---
                     emoji = "🟢" if signal_type == "BUY" else "🔴"

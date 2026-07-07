@@ -287,3 +287,177 @@ def analyze_signal_with_ai(signal_data: dict) -> dict:
         logger.error(f"AI Signal Analysis failed: {e}")
     
     return {"score": 50, "analysis": "AI could not complete analysis at this time."}
+
+_SIGNAL_FILTER_PROMPT = """You are CryptoEdge Signal Filter & Validator — a post-processing engine that receives raw trading signals from multiple strategies and cleans, deduplicates, resolves conflicts, and quality-gates them before output.
+
+You fix four critical problems seen in multi-strategy signal systems:
+1. Duplicate signals — same coin, same direction, fired multiple times
+2. Conflicting signals — same coin, opposite directions firing simultaneously
+3. No quality filter — weak and strong signals treated equally
+4. Stale signals — "wait" status signals that never execute
+
+═══════════════════════════════════════
+STEP 1 — DEDUPLICATION
+═══════════════════════════════════════
+
+For each incoming batch of signals, group by symbol + direction + timeframe.
+
+Rules:
+→ If two or more signals share the same symbol + direction + timeframe:
+   Keep only ONE — the one with the highest score.
+   Discard all duplicates silently.
+
+→ If two signals share the same symbol + direction but DIFFERENT timeframes:
+   Keep both — they are separate setups.
+   Tag each with their timeframe clearly.
+
+→ If a signal has status "wait" for more than 3 candles:
+   Mark as EXPIRED and discard from output.
+   Do not show wait signals that are stale.
+
+═══════════════════════════════════════
+STEP 2 — CONFLICT RESOLUTION
+═══════════════════════════════════════
+
+For each symbol, check if BOTH a LONG and SHORT signal exist simultaneously.
+
+Rule A — Score gap is clear (difference >= 15 points):
+→ Keep the higher scoring direction only.
+→ Discard the lower scoring direction completely.
+→ Add note: "Opposite signal discarded — score gap [X] pts"
+
+Rule B — Score gap is close (difference < 15 points):
+→ Discard BOTH signals for that symbol.
+→ Output: {{ "symbol": "XRPUSDT", "status": "CONFLICT", "reason": "Long and Short scores too close — no clear edge" }}
+→ Do NOT trade when direction is ambiguous.
+
+Rule C — Same strategy fires LONG and SHORT on same symbol:
+→ Discard both immediately regardless of score.
+→ Strategy is malfunctioning — flag it.
+→ Output warning: "Strategy conflict detected on [symbol] — both directions fired from same strategy"
+
+═══════════════════════════════════════
+STEP 3 — QUALITY GATE
+═══════════════════════════════════════
+
+After dedup and conflict resolution, apply score filter:
+
+Score thresholds:
+  86–100 → PREMIUM   pass — auto-trade eligible
+  71–85  → GOOD      pass — show for manual review
+  51–70  → WEAK      block — do not show, log only
+  0–50   → NOISE     block — discard silently
+
+Additional quality checks:
+→ If volume < 1.0x average at signal time: downgrade score by 10
+→ If signal fires during Asian session (00:00–03:00 UTC): downgrade score by 5
+→ If HTF (1H or 4H) disagrees with signal direction: downgrade score by 15
+→ If price is beyond EMA 200 in wrong direction: downgrade score by 8
+
+Only signals with final score >= 71 after all downgrades are shown in output.
+
+═══════════════════════════════════════
+STEP 4 — WAIT STATUS HANDLING
+═══════════════════════════════════════
+
+For signals with status "wait":
+→ Check how many candles have passed since signal was generated
+→ If candles passed <= 3: keep signal, mark as "pending"
+→ If candles passed > 3: mark as EXPIRED, remove from output
+→ Never show an expired wait signal to the trader
+
+═══════════════════════════════════════
+STEP 5 — FINAL OUTPUT RULES
+═══════════════════════════════════════
+
+After all steps above, output only clean, valid, high-quality signals.
+
+Sort output by final_score descending (highest score first).
+Maximum signals per output batch: 5
+If more than 5 pass all filters, keep only top 5 by score.
+
+For each valid signal output:
+{{
+  "symbol": "BTCUSDT",
+  "direction": "LONG" | "SHORT",
+  "timeframe": "15M",
+  "final_score": 84,
+  "grade": "GOOD",
+  "strategy": "unified_score_engine",
+  "status": "active" | "pending",
+  "session": "london" | "ny" | "asian" | "off-session",
+  "htf_confirmed": true | false,
+  "dedup_action": "kept" | "merged_from_N_duplicates",
+  "conflict_action": "none" | "opposite_discarded",
+  "reasons": ["..."],
+  "warnings": ["..."],
+  "expires_in_candles": 3,
+  "timestamp": "ISO8601"
+}}
+
+For discarded/blocked signals, output a separate array:
+{{
+  "discarded": [
+    {{ "symbol": "XRPUSDT", "reason": "duplicate — lower score kept", "score": 45 }},
+    {{ "symbol": "LTCUSDT", "reason": "conflict — scores too close (long:52 short:48)", "score": null }},
+    {{ "symbol": "TRXUSDT", "reason": "wait signal expired — 4 candles passed", "score": 38 }}
+  ]
+}}
+
+═══════════════════════════════════════
+INCOMING SIGNALS
+═══════════════════════════════════════
+{signals_json}
+
+Return ONLY valid JSON containing a single object with two keys: "valid_signals" (array) and "discarded" (array).
+"""
+
+def filter_signals_batch_with_ai(signals_list: list) -> dict:
+    """
+    Evaluate a batch of signals using AI to deduplicate, resolve conflicts, and filter out low-quality ones.
+    """
+    if not NVIDIA_API_KEY and not OPENROUTER_API_KEY:
+        return {"valid_signals": [], "discarded": [{"reason": "AI analysis unavailable (missing API keys)."}]}
+
+    import json
+    try:
+        signals_json = json.dumps(signals_list, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Failed to serialize signals list: {e}")
+        signals_json = str(signals_list)
+
+    prompt = _SIGNAL_FILTER_PROMPT.format(signals_json=signals_json)
+
+    payload = {
+        "messages": [
+            {"role": "system", "content": "You are a professional crypto trading validator. Respond ONLY in JSON format."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"}
+    }
+
+    try:
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY if OPENROUTER_API_KEY else NVIDIA_API_KEY}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:5174",
+        }
+        url = OPENROUTER_URL if OPENROUTER_API_KEY else NVIDIA_URL
+        model = OPENROUTER_MODEL if OPENROUTER_API_KEY else DEFAULT_MODEL
+        
+        # Use a more capable model for complex reasoning if available
+        if OPENROUTER_API_KEY:
+            payload["model"] = "meta-llama/llama-3.3-70b-instruct:free"
+        else:
+            payload["model"] = model
+            
+        resp = requests.post(url, json=payload, headers=headers, timeout=60)
+        if resp.status_code == 200:
+            content = resp.json()["choices"][0]["message"]["content"]
+            content = _strip_code_fences(content)
+            return json.loads(content)
+    except Exception as e:
+        logger.error(f"AI Signal Batch Filtering failed: {e}")
+    
+    return {"valid_signals": [], "discarded": [{"reason": "AI could not complete analysis at this time."}]}

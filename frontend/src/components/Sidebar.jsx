@@ -16,6 +16,7 @@ const NAV = [
     { to: '/futures', icon: Activity, label: 'Futures' },
     { to: '/autotrader', icon: Cpu, label: 'AutoTrader' },
     { to: '/signal-engine', icon: Target, label: 'Signal Engine' },
+    { to: '/ai-filtered-signals', icon: Cpu, label: 'AI Filtered Signals' },
     { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 

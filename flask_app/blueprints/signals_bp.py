@@ -418,3 +418,78 @@ def history_detailed():
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         db.close()
+
+@signals_bp.route("/evaluate/<int:signal_id>", methods=["POST"])
+def evaluate_signal_with_ai(signal_id):
+    """Evaluate an existing signal using AI and persist the score/analysis in the database."""
+    import re
+    import json
+    
+    db = SessionLocal()
+    try:
+        s = db.query(Signal).options(
+            joinedload(Signal.coin), 
+            joinedload(Signal.strategy)
+        ).filter_by(id=signal_id).first()
+        
+        if not s:
+            return jsonify({"status": "error", "message": "Signal not found"}), 404
+            
+        from services.signal_service import generate_signal_stream
+        
+        # Determine direction
+        direction = "LONG" if s.signal_type == "BUY" else "SHORT"
+        
+        # Run generator to gather complete content
+        generator = generate_signal_stream(
+            db=db,
+            strategy_id=s.strategy_id,
+            coin=s.coin.symbol,
+            timeframe=s.timeframe,
+            direction=direction,
+            rr_ratio=s.rr_ratio or 2.0,
+            sl_method=s.sl_method or "atr",
+            account_size=10000.0,
+            risk_pct=1.0,
+            extra_context="Manual AI Evaluation of live signal",
+            entry_price=s.entry_price,
+            sl_price=s.stop_loss,
+            tp_price=s.take_profit
+        )
+        
+        full_content = ""
+        for chunk in generator:
+            if chunk:
+                full_content += chunk
+                
+        # Parse output JSON to get score and details
+        try:
+            # Clean up JSON blocks if mixed with text
+            json_match = re.search(r'\{[\s\S]*\}', full_content)
+            if json_match:
+                signal_json = json.loads(json_match.group(0))
+            else:
+                signal_json = json.loads(full_content)
+                
+            s.ai_score = float(signal_json.get("confidence_score", signal_json.get("final_score", 0.0)))
+            s.ai_analysis = json.dumps(signal_json) # Save full response JSON
+            db.commit()
+            
+            return jsonify({
+                "status": "success",
+                "ai_score": s.ai_score,
+                "ai_analysis": signal_json
+            })
+        except Exception as e:
+            logger.error(f"Failed to parse or save AI evaluation: {e}. Raw content: {full_content}")
+            return jsonify({
+                "status": "error", 
+                "message": f"Failed to parse AI response: {str(e)}", 
+                "raw_response": full_content
+            }), 500
+            
+    except Exception as e:
+        logger.exception(f"Error in evaluate_signal_with_ai: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        db.close()

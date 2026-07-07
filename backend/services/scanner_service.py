@@ -184,6 +184,16 @@ def run_scanner():
                     tp_ratio = global_tp / global_sl if global_sl > 0 else 2.0
                     tp = strategy.calculate_take_profit(last_close, signal_type, ratio=tp_ratio)
 
+                    # Filter out signals with low TP margin (< 1%)
+                    if signal_type == "BUY":
+                        tp_margin = (tp - last_close) / last_close * 100
+                    else:
+                        tp_margin = (last_close - tp) / last_close * 100
+                    
+                    if tp_margin < 1.0:
+                        logger.info(f"Skipping signal for {coin.symbol} - TP margin too low: {tp_margin:.2f}% < 1%")
+                        continue
+
                     # Avoid duplicate signals within same candle
                     recent = (
                         db.query(Signal)
@@ -191,7 +201,7 @@ def run_scanner():
                             Signal.coin_id == coin.id,
                             Signal.strategy_id == strategy_obj.id,
                             Signal.signal_type == signal_type,
-                            Signal.status == "active",
+                            Signal.status.in_(["active", "wait"]),
                         )
                         .order_by(Signal.created_at.desc())
                         .first()
@@ -237,49 +247,79 @@ def run_scanner():
                     )
                     db.add(sig)
                     db.flush()
-                    generated += 1
 
-                    # Safely dispatch async broadcast to main event loop
+                    # Run signal filter
+                    sig_dict = {
+                        "id": sig.id,
+                        "coin_id": coin.id,
+                        "symbol": coin.symbol,
+                        "strategy_id": strategy_obj.id,
+                        "signal_type": signal_type,
+                        "entry_price": last_close,
+                        "stop_loss": sl,
+                        "take_profit": tp,
+                        "confidence": round(last_confidence, 1),
+                        "volatility": round(last_volatility, 2) if last_volatility is not None else None,
+                        "timeframe": mapping.timeframe,
+                    }
+
+                    from services.signal_filter import validate_signal
                     global main_loop
                     if main_loop:
-                        asyncio.run_coroutine_threadsafe(
-                            broadcast_signal({
-                                "id": sig.id,
-                                "symbol": coin.symbol,
-                                "strategy": strategy_obj.name,
-                                "signal_type": signal_type,
-                                "entry_price": last_close,
-                                "stop_loss": sl,
-                                "take_profit": tp,
-                                "confidence": round(last_confidence, 1),
-                                "volatility": round(last_volatility, 2) if last_volatility is not None else None,
-                                "timeframe": mapping.timeframe,
-                                "ai_analysis": ai_result.get("analysis"),
-                                "ai_score": ai_result.get("score", 50),
-                                "created_at": datetime.utcnow().isoformat() + "Z",
-                            }),
-                            main_loop
-                        )
+                        future = asyncio.run_coroutine_threadsafe(validate_signal(sig_dict), main_loop)
+                        val_res = future.result()
+                    else:
+                        val_res = asyncio.run(validate_signal(sig_dict))
 
-                    # --- SEND TELEGRAM ALERT ---
-                    emoji = "🟢" if signal_type == "BUY" else "🔴"
-                    clean_symbol = coin.symbol.split(':')[0].replace('/', '')
-                    tv_url = f"https://www.tradingview.com/chart/?symbol=BINANCE:{clean_symbol}.P"
-                    
-                    msg = (
-                        f"🚨 <b>CRYPTOEDGE {signal_type} SIGNAL</b> 🚨\n\n"
-                        f"{emoji} <b>Coin:</b> #{clean_symbol}\n"
-                        f"⏱ <b>Timeframe:</b> {mapping.timeframe}\n"
-                        f"📈 <b>Strategy:</b> {strategy_obj.name}\n"
-                        f"🎯 <b>Price:</b> {last_close}\n\n"
-                        f"🤖 <b>AI Analysis:</b> {ai_result.get('analysis')}\n"
-                        f"📊 <b>AI Score:</b> {ai_result.get('score')}/100\n\n"
-                        f"🛑 <b>SL:</b> {sl}\n"
-                        f"✅ <b>TP:</b> {tp}\n\n"
-                        f"🔥 <i>Confidence: {round(last_confidence, 1)}%</i>\n\n"
-                        f"🔗 <a href='{tv_url}'>View on TradingView</a>"
-                    )
-                    send_telegram_message(msg)
+                    sig.filter_status = "approved" if val_res["approved"] else "skipped"
+                    sig.filter_reason = val_res["reason"]
+
+                    generated += 1
+
+                    # STEP 4 - Only if all 3 filters PASS → mark signal as APPROVED and proceed to execution
+                    if val_res["approved"]:
+                        # Safely dispatch async broadcast to main event loop
+                        if main_loop:
+                            asyncio.run_coroutine_threadsafe(
+                                broadcast_signal({
+                                    "id": sig.id,
+                                    "symbol": coin.symbol,
+                                    "strategy": strategy_obj.name,
+                                    "signal_type": signal_type,
+                                    "entry_price": last_close,
+                                    "stop_loss": sl,
+                                    "take_profit": tp,
+                                    "confidence": round(last_confidence, 1),
+                                    "volatility": round(last_volatility, 2) if last_volatility is not None else None,
+                                    "timeframe": mapping.timeframe,
+                                    "ai_analysis": ai_result.get("analysis"),
+                                    "ai_score": ai_result.get("score", 50),
+                                    "created_at": datetime.utcnow().isoformat() + "Z",
+                                }),
+                                main_loop
+                            )
+
+                        # --- SEND TELEGRAM ALERT ---
+                        emoji = "🟢" if signal_type == "BUY" else "🔴"
+                        clean_symbol = coin.symbol.split(':')[0].replace('/', '')
+                        tv_url = f"https://www.tradingview.com/chart/?symbol=BINANCE:{clean_symbol}.P"
+                        
+                        msg = (
+                            f"🚨 <b>CRYPTOEDGE {signal_type} SIGNAL (APPROVED)</b> 🚨\n\n"
+                            f"{emoji} <b>Coin:</b> #{clean_symbol}\n"
+                            f"⏱ <b>Timeframe:</b> {mapping.timeframe}\n"
+                            f"📈 <b>Strategy:</b> {strategy_obj.name}\n"
+                            f"🎯 <b>Price:</b> {last_close}\n\n"
+                            f"🤖 <b>AI Analysis:</b> {ai_result.get('analysis')}\n"
+                            f"📊 <b>AI Score:</b> {ai_result.get('score')}/100\n\n"
+                            f"🛑 <b>SL:</b> {sl}\n"
+                            f"✅ <b>TP:</b> {tp}\n\n"
+                            f"🔥 <i>Confidence: {round(last_confidence, 1)}%</i>\n\n"
+                            f"🔗 <a href='{tv_url}'>View on TradingView</a>"
+                        )
+                        send_telegram_message(msg)
+                    else:
+                        logger.info(f"Signal for {coin.symbol} was SKIPPED during validation: {val_res['reason']}")
 
             except Exception as e:
                 logger.warning(f"Scanner error for {mapping.coin.symbol}: {e}")

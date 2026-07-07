@@ -19,6 +19,7 @@ import Settings from './pages/Settings'
 import AutoTrader from './pages/AutoTrader'
 import SignalEngine from './pages/SignalEngine'
 import ElitePicks from './pages/ElitePicks'
+import AIFilteredSignals from './pages/AIFilteredSignals'
 
 import { useQuery } from '@tanstack/react-query'
 import { API } from './lib/api'
@@ -63,6 +64,7 @@ function AppShell() {
             <Route path="/autotrader" element={<AutoTrader />} />
             <Route path="/signal-engine" element={<SignalEngine />} />
             <Route path="/elite-picks" element={<ElitePicks />} />
+            <Route path="/ai-filtered-signals" element={<AIFilteredSignals />} />
           </Routes>
         </main>
       </div>

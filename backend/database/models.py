@@ -95,11 +95,31 @@ class Signal(Base):
     status = Column(String(20), default="active")  # active, closed, cancelled
     ai_analysis = Column(Text, nullable=True) # AI analysis details
     ai_score = Column(Float, nullable=True) # AI sentiment score (0-100)
+    filter_status = Column(String(20), nullable=True) # approved, skipped
+    filter_reason = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     coin = relationship("Coin", back_populates="signals")
     strategy = relationship("Strategy", back_populates="signals")
     trades = relationship("Trade", back_populates="signal")
+    filter_logs = relationship("SignalFilterLog", back_populates="signal")
+
+
+class SignalFilterLog(Base):
+    __tablename__ = "signal_filter_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    signal_id = Column(Integer, ForeignKey("signals.id"), nullable=True)
+    symbol = Column(String(20), nullable=False)
+    direction = Column(String(10), nullable=False)
+    funding_rate = Column(Float, nullable=True)
+    liquidation_found = Column(Boolean, default=False)
+    duplicate_found = Column(Boolean, default=False)
+    final_status = Column(String(20), nullable=False) # approved / skipped
+    reason = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    signal = relationship("Signal", back_populates="filter_logs")
 
 
 class Trade(Base):
