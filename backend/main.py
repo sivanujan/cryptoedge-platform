@@ -65,7 +65,7 @@ app.add_middleware(
 )
 
 # Register routers
-from routers import coins, strategies, backtest, signals, dashboard, analysis, futures
+from routers import coins, strategies, backtest, signals, dashboard, analysis, futures, astro
 from routers import settings as settings_router
 from routers import scanner_router
 
@@ -78,6 +78,8 @@ app.include_router(settings_router.router)
 app.include_router(analysis.router)
 app.include_router(futures.router)
 app.include_router(scanner_router.router)
+app.include_router(astro.router)
+
 
 
 @app.get("/health")

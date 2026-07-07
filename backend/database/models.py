@@ -169,3 +169,50 @@ class BacktestJob(Base):
     error_detail = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class BirthChart(Base):
+    __tablename__ = "birth_charts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, unique=True, index=True, nullable=False)
+    dob = Column(String(50), nullable=False)
+    tob = Column(String(50), nullable=False)
+    lat = Column(Float, nullable=False)
+    long = Column(Float, nullable=False)
+    tz = Column(String(50), nullable=False)
+    ascendant_sign = Column(String(50), nullable=False)
+    planet_positions = Column(JSON, nullable=False)
+    nakshatra_data = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class DashaPeriod(Base):
+    __tablename__ = "dasha_periods"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    level = Column(String(20), nullable=False, index=True)  # maha, antar, pratyantar, sookshma, prana
+    planet = Column(String(20), nullable=False, index=True)
+    start_datetime = Column(DateTime(6), nullable=False)
+    end_datetime = Column(DateTime(6), nullable=False)
+    parent_period_id = Column(Integer, ForeignKey("dasha_periods.id"), nullable=True)
+
+    # Self-referential relationship
+    parent = relationship("DashaPeriod", remote_side=[id])
+
+
+class TradingSignalLog(Base):
+    __tablename__ = "trading_signal_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    timestamp = Column(DateTime, nullable=False, index=True)
+    dasha_stack = Column(JSON, nullable=False)
+    hora_lord = Column(String(20), nullable=False)
+    score = Column(Float, nullable=False)
+    recommendation = Column(String(20), nullable=False)  # ENTER, CAUTION, AVOID
+    actual_trade_taken = Column(Boolean, default=False)
+    actual_result = Column(SAEnum("profit", "loss", "na", name="actual_result_enum"), default="na")
+    created_at = Column(DateTime, default=datetime.utcnow)
+

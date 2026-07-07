@@ -42,3 +42,6 @@ def init_db():
     from database import models  # noqa: F401 — registers Coin, Strategy, Signal, etc.
     from database import scanner_models  # noqa: F401 — registers BreakoutSignal, ScannerRun
     Base.metadata.create_all(bind=engine)
+    # Create tables registered on models.py Base
+    models.Base.metadata.create_all(bind=engine)
+
