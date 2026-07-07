@@ -110,14 +110,7 @@ OUTPUT FORMAT (strict JSON only, return nothing else):
 }}
 
 RULES:
-- Never output "STRONG" if direction_alignment.aligned is false, unless ict_analysis.structure_event shows a confirmed CHoCH + retest supporting the NEW direction.
-- Never output "STRONG" if risk_reward_ratio < 1.5.
-- Never output "STRONG" unless at least ONE of (fvg_present_in_favor, liquidity_sweep_detected, order_block_retest) is true — entries with zero ICT-based location confluence should be capped at "MODERATE" at best.
-- If volume_ratio is below 0.8, cap verdict at "MODERATE" regardless of other factors.
-- Do NOT reference forex/stock trading sessions as a factor.
-- Do NOT reference strategy win rate, trade count, or historical performance anywhere in output.
-- If funding rate or open interest data is not provided, set those fields to "unknown" and do not penalize for missing data.
-- Be skeptical by default. If in doubt, lean toward WEAK_SKIP and state what would need to change (e.g., "wait for retest of the 4H order block near X" or "needs a liquidity sweep of the recent low before confirming").
+{rules}
 """
 
 def get_higher_timeframe(tf: str) -> str:
@@ -603,7 +596,7 @@ def get_derivatives_context(exchange, symbol, direction, timeframe, entry_price=
 
     return info
 
-def generate_signal_stream(db, strategy_id, coin, timeframe, direction, rr_ratio, sl_method, account_size, risk_pct, extra_context, entry_price=None, sl_price=None, tp_price=None):
+def generate_signal_stream(db, strategy_id, coin, timeframe, direction, rr_ratio, sl_method, account_size, risk_pct, extra_context, entry_price=None, sl_price=None, tp_price=None, severity='BALANCED'):
     """
     Generate a signal using AI and stream the response.
     """
@@ -614,6 +607,29 @@ def generate_signal_stream(db, strategy_id, coin, timeframe, direction, rr_ratio
     if not strategy:
         yield "Error: Strategy not found"
         return
+
+    # Add severity instructions to extra_context
+    severity_instruction = ""
+    sev_upper = severity.upper() if severity else "BALANCED"
+    if sev_upper == 'STRICT':
+        severity_instruction = (
+            "AUDIT SEVERITY: STRICT. Evaluate with maximum skepticism. "
+            "Enforce all rules and penalties strictly. Deduct maximum points for any trend misalignment, "
+            "RSI divergence, low volume ratio, or BTC correlation anomalies. Cautiously label signals as WEAK_SKIP if any layer fails."
+        )
+    elif sev_upper == 'BALANCED':
+        severity_instruction = (
+            "AUDIT SEVERITY: BALANCED. Be skeptical but fair. "
+            "If the HTF trend is 'ranging' instead of actively opposing, do not penalize the direction alignment (aligned can be true if local trend matches signal). "
+            "Standard indicator penalties apply."
+        )
+    elif sev_upper == 'LENIENT':
+        severity_instruction = (
+            "AUDIT SEVERITY: LENIENT. Prioritize favorable Risk-Reward ratios and ICT-based zone locations (order blocks, FVGs). "
+            "Ignore minor volume ratio issues (do not penalize if volume_ratio > 0.6) and do not penalize for minor RSI divergences. "
+            "Only penalize direction alignment if the HTF trend is actively opposing the signal direction (e.g. LONG signal into a down HTF trend)."
+        )
+    extra_context = f"=== AUDIT MODE: {sev_upper} ===\n{severity_instruction}\n\n{extra_context or ''}"
 
     # Fetch OHLCV data to get current price, indicators, and trend
     from services.binance_service import get_ohlcv, get_current_price
@@ -755,7 +771,41 @@ def generate_signal_stream(db, strategy_id, coin, timeframe, direction, rr_ratio
         drawdown=coin_result.drawdown if coin_result else 0.0
     )
     
-    # 3. Build prompt
+    # 3. Build prompt rules based on severity
+    rules = ""
+    sev_upper = severity.upper() if severity else "BALANCED"
+    if sev_upper == 'STRICT':
+        rules = (
+            "- Never output \"STRONG\" if direction_alignment.aligned is false, unless ict_analysis.structure_event shows a confirmed CHoCH + retest supporting the NEW direction.\n"
+            "- Never output \"STRONG\" if risk_reward_ratio < 1.5.\n"
+            "- Never output \"STRONG\" unless at least ONE of (fvg_present_in_favor, liquidity_sweep_detected, order_block_retest) is true — entries with zero ICT-based location confluence should be capped at \"MODERATE\" at best.\n"
+            "- If volume_ratio is below 0.8, cap verdict at \"MODERATE\" regardless of other factors.\n"
+            "- Do NOT reference forex/stock trading sessions as a factor.\n"
+            "- Do NOT reference strategy win rate, trade count, or historical performance anywhere in output.\n"
+            "- If funding rate or open interest data is not provided, set those fields to \"unknown\" and do not penalize for missing data.\n"
+            "- Be highly skeptical by default. If in doubt, lean toward WEAK_SKIP."
+        )
+    elif sev_upper == 'BALANCED':
+        rules = (
+            "- Never output \"STRONG\" if direction_alignment.aligned is false, unless HTF trend is ranging or there is an ICT structure break (BOS/CHoCH) supporting the signal.\n"
+            "- Never output \"STRONG\" if risk_reward_ratio < 1.5.\n"
+            "- entries with zero ICT-based location confluence should be capped at \"MODERATE\" at best.\n"
+            "- If volume_ratio is below 0.8, cap verdict at \"MODERATE\".\n"
+            "- Do NOT reference forex/stock trading sessions as a factor.\n"
+            "- Do NOT reference strategy win rate, trade count, or historical performance anywhere in output.\n"
+            "- If funding rate or open interest data is not provided, set those fields to \"unknown\".\n"
+            "- Be skeptical but fair."
+        )
+    else:  # LENIENT
+        rules = (
+            "- You may output \"STRONG\" or \"MODERATE\" even if direction_alignment.aligned is false, as long as the local timeframe trend matches the signal direction and HTF trend is ranging (not opposing).\n"
+            "- You may output \"STRONG\" if risk_reward_ratio >= 1.5.\n"
+            "- Do not penalize or cap the score for minor volume ratio drops (only cap at \"MODERATE\" if volume_ratio is extremely low, below 0.4).\n"
+            "- Do not penalize for minor RSI divergences or normal volatility regimes.\n"
+            "- Prioritize high Risk-Reward and local order block or FVG entries. Be generous with the confidence score (allow scores above 75 if local structure is solid).\n"
+            "- If funding rate or open interest data is not provided, set those fields to \"unknown\"."
+        )
+
     prompt = PROMPT_TEMPLATE.format(
         strategy_name=strategy.name,
         coin=coin,
@@ -773,7 +823,8 @@ def generate_signal_stream(db, strategy_id, coin, timeframe, direction, rr_ratio
         sl_method=sl_method,
         account_size=account_size,
         risk_pct=risk_pct,
-        extra_context=extra_context
+        extra_context=extra_context,
+        rules=rules
     )
     
     # 4. Call OpenRouter with streaming

@@ -74,5 +74,5 @@ export const API = {
     getJournalMistakes: () => api.get('/journal/mistakes').then(r => r.data),
     refreshJournal: () => api.post('/journal/refresh').then(r => r.data),
     getJournalCalendar: () => api.get('/journal/calendar').then(r => r.data),
-    evaluateSignalWithAI: (id) => api.post(`/signals/evaluate/${id}`).then(r => r.data),
+    evaluateSignalWithAI: (id, severity = 'BALANCED') => api.post(`/signals/evaluate/${id}`, { severity }).then(r => r.data),
 }

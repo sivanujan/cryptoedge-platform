@@ -33,10 +33,13 @@ export default function AIFilteredSignals() {
 
     const signalsList = data?.signals || []
 
+    const [severity, setSeverity] = useState('BALANCED') // STRICT, BALANCED, LENIENT
+
     // Mutate to evaluate signal with AI
     const evaluateMutation = useMutation({
-        mutationFn: (id) => API.evaluateSignalWithAI(id),
-        onSuccess: (res, id) => {
+        mutationFn: ({ id, severity }) => API.evaluateSignalWithAI(id, severity),
+        onSuccess: (res, variables) => {
+            const { id } = variables
             toast.success('AI Evaluation completed successfully!')
             queryClient.invalidateQueries(['signalsHistory'])
             setEvaluatingId(null)
@@ -63,7 +66,7 @@ export default function AIFilteredSignals() {
 
     const handleEvaluate = (id) => {
         setEvaluatingId(id)
-        evaluateMutation.mutate(id)
+        evaluateMutation.mutate({ id, severity })
     }
 
     // Filter & Search Logic
@@ -181,6 +184,19 @@ export default function AIFilteredSignals() {
                             </button>
                         ))}
                     </div>
+                </div>
+
+                <div>
+                    <label style={{ fontSize: '11px', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', display: 'block', marginBottom: 6 }}>AUDIT SEVERITY</label>
+                    <select 
+                        value={severity} 
+                        onChange={e => setSeverity(e.target.value)} 
+                        style={{ width: '100%', padding: '10px 12px', background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '13px' }}
+                    >
+                        <option value="STRICT">Strict (Max Skepticism)</option>
+                        <option value="BALANCED">Balanced (Standard)</option>
+                        <option value="LENIENT">Lenient (High RR Focus)</option>
+                    </select>
                 </div>
             </div>
 

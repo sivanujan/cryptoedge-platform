@@ -424,7 +424,13 @@ def evaluate_signal_with_ai(signal_id):
     """Evaluate an existing signal using AI and persist the score/analysis in the database."""
     import re
     import json
+    from flask import request
     
+    severity = "BALANCED"
+    if request.is_json:
+        req_data = request.get_json() or {}
+        severity = req_data.get("severity", "BALANCED").upper()
+        
     db = SessionLocal()
     try:
         s = db.query(Signal).options(
@@ -454,7 +460,8 @@ def evaluate_signal_with_ai(signal_id):
             extra_context="Manual AI Evaluation of live signal",
             entry_price=s.entry_price,
             sl_price=s.stop_loss,
-            tp_price=s.take_profit
+            tp_price=s.take_profit,
+            severity=severity
         )
         
         full_content = ""
